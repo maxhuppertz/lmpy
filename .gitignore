@@ -3,10 +3,10 @@
 !.gitignore
 !README.md
 !LICENSE.txt
+!LICENSE
 !.gitkeep
 !*/
 !*.do
 !*.py
 !*.r
-!LICENSE
 setup.py
