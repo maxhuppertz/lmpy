@@ -10,8 +10,8 @@ import numba as nb
 import pandas as pd
 import scipy.stats
 from hdmpy import cvec
+from lmpy import ols
 from multiprocessing import cpu_count
-from ols import ols
 
 ################################################################################
 ### 2: Auxiliary functions
