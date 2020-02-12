@@ -6,7 +6,6 @@
 import copy as cp
 import joblib as jbl
 import numpy as np
-import numba as nb
 import pandas as pd
 import scipy.stats
 from hdmpy import cvec
