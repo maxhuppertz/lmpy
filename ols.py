@@ -120,6 +120,10 @@ class ols():
         # Variables created by self.summarize()
         self.regtable = None
 
+        # Variables created by self.predict()
+        self.predict_X = None
+        self.y_hat = None
+
         # Variables created by self.simulate()
         self.sim_coef = None
         self.sim_X = None
@@ -190,7 +194,7 @@ class ols():
         # Check whether X is a pandas Series
         elif isinstance(X, pd.Series):
             # If so, set names_X to the Series name
-            self.names_X = X.name
+            self.names_X = [X.name]
 
         # If all else fails...
         else:
@@ -218,19 +222,19 @@ class ols():
 
         # Instantiate data matrices
         #
+        # Start by instantiating the X data as is
+        self.X = cvec(X)
+
         # Check whether to add an intercept
         if self.add_icept:
             # If so, set up an intercept
-            cons = np.ones(shape=(X.shape[0], 1))
+            cons = np.ones(shape=(self.X.shape[0], 1))
 
             # Add it to the data matrix
-            self.X = np.concatenate([cons, X], axis=1)
+            self.X = np.concatenate([cons, self.X], axis=1)
 
             # Add the intercept to the variables names
             self.names_X = [self.name_gen_icept] + list(self.names_X)
-        else:
-            # Otherwise, just instantiate the X data as is
-            self.X = X
 
         # For speed considerations, make sure these are self.fprec types
         self.X = np.array(self.X).astype(self.fprec)
@@ -245,7 +249,9 @@ class ols():
         if clusters is not None:
             # If so, adjust the cluster variable (here, using integers makes
             # sense, because these might be used as an indexer at some point)
-            self.clustvar = cvec(clusters).astype(np.int)
+            #
+            # Removed integer conversion to deal with string data
+            self.clustvar = cvec(clusters)#.astype(np.int)
 
         # Calculate X'X
         self.XX = self.X.T @ self.X
@@ -486,8 +492,36 @@ class ols():
         return self.regtable
 
 
+    # Define a function which calculates fitted values
+    def predict(self, X=None):
+        """ Calculate fitted values """
+
+        # Check whether X data were provided
+        if X is not None:
+            # If so, use those
+            self.predict_X = cvec(X)
+        else:
+            # Otherwise, use the existing data
+            self.predict_X = self.X
+
+        # Check whether an intercept needs to be added
+        if self.add_icept:
+            # If so, set up an intercept
+            cons = np.ones(shape=(self.predict_X.shape[0], 1))
+
+            # Add it to the data matrix
+            self.predict_X = np.concatenate([cons, self.predict_X], axis=1)
+
+        # Get fitted values
+        self.y_hat = self.predict_X @ self.coef
+
+        # Return them
+        return self.y_hat
+
     # Define a function which generates a new draw of data (for bootstrapping)
     def simulate(self, residuals, X=None, coef=None):
+        """ Simulate data for bootstrap draws """
+
         # Check whether coef was left at the default None
         if coef is None:
             # If so, set the simulation coefficients to the fitted coefficients
