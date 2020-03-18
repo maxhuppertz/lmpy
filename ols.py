@@ -271,24 +271,32 @@ class ols():
         # Calculate X'X
         self.XX = self.X.T @ self.X
 
+        # OLD
+        #
         # Calculate (X'X)^(-1)
         #
         # This may fail if that matrix is not invertible, so use try-except
-        try:
+        #try:
             # Get the inverse
-            self.XXinv = scl.inv(self.XX)
+        #    self.XXinv = scl.inv(self.XX)
         # Catch linear algebra errors
-        except np.linalg.LinAlgError as e:
+        #except np.linalg.LinAlgError as e:
             # Check whether the error was due to a singular X'X matrix
-            if 'singular matrix' in str(e):
+        #    if 'singular matrix' in str(e):
                 # If so, use the Moore-Penrose pseudo inverse for real Hermitian
                 # matrices
-                self.XXinv = scl.pinvh(self.XX)
+        #        self.XXinv = scl.pinv2(self.XX)
 
                 # Check whether to be talkative
-                if self.verbose:
-                    print("\nNote in ols(): X'X matrix was not invertible,",
-                          'Moore-Penrose pseudo-inverse had to be used')
+        #        if self.verbose:
+        #            print("\nNote in ols.ols_cov(): X'X matrix was not",
+        #                  'invertible, Moore-Penrose pseudo-inverse had to be'
+        #                  'used')
+
+        # NEW
+        #
+        # Calculate (X'X)^(-1)
+        self.XXinv = scl.pinv2(self.XX)
 
         # Calculate coefficient vector
         self.coef = self.XXinv @ (self.X.T @ self.y)
@@ -688,13 +696,42 @@ class ols():
 
         # Calculate Wald statistic
         #
-        # Calculate outer parts of the Wald 'sandwich'
+        # Calculate outer parts of the Wald 'sandwich', R beta - b
         Rbdiff = R @ self.coef - b
 
-        # Calculate Wald statistic
-        self.W = (
-            Rbdiff.T @ scl.inv(R @ self.V_hat @ R.T) @ Rbdiff
-        )
+        # OLD
+        #
+        # Calculate inner part of the Wald 'sandwich', RVR'
+        #
+        # This may fail if that matrix is not invertible, so use try-except
+        #try:
+            # Get the inverse
+        #    RVRinv = scl.inv(R @ self.V_hat @ R.T)
+
+            # Calculate the Wald statistic
+        #    self.W = Rbdiff.T @ RVRinv @ Rbdiff
+
+        # Catch linear algebra errors
+        #except np.linalg.LinAlgError as e:
+            # Check whether the error was due to a singular X'X matrix
+        #    if 'singular matrix' in str(e):
+                # If so, use the Moore-Penrose pseudo inverse for real Hermitian
+                # matrices
+        #        RVRinv = scl.pinv2(R @ self.V_hat @ R.T)
+
+                # Check whether to be talkative
+        #        if self.verbose:
+        #            print("\nNote in ols.wald(): RVR' matrix was not",
+        #                  'invertible, Moore-Penrose pseudo-inverse had to be',
+        #                  'used')
+
+        # NEW
+        #
+        # Calculate inner part of the Wald 'sandwich', RVR'
+        RVRinv = scl.pinv2(R @ self.V_hat @ R.T)
+
+        # Calculate the Wald statistic
+        self.W = Rbdiff.T @ RVRinv @ Rbdiff
 
         # Calculate p-value
         #
