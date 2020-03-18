@@ -5,7 +5,8 @@
 # Import necessary packages
 import numpy as np
 import pandas as pd
-import scipy.linalg
+import scipy.linalg as scl
+import scipy.stats as scs
 from hdmpy import cvec
 from scipy.stats import norm
 
@@ -121,18 +122,25 @@ class ols():
         self.regtable = None
 
         # Variables created by self.predict()
-        self.predict_X = None
         self.y_hat = None
 
+        # Variables created by self.score()
+        self.R2 = None
+
+        # Variable created by self.wald()
+        self.W = None
+        self.pW = None
+        self.waldtable = None
+
         # Variables created by self.simulate()
-        self.sim_coef = None
-        self.sim_X = None
-        self.sim_residuals = None
+        #self.sim_coef = None
+        #self.sim_X = None
+        #self.sim_residuals = None
         self.sim_y = None
 
 
     # Define a function to fit the model
-    def fit(self, y, X, clusters=None, names_X=None, name_y=None,
+    def fit(self, X, y, clusters=None, names_X=None, name_y=None,
             name_gen_X=None, name_gen_y=None, add_intercept=None,
             coef_only=None):
         """ Fit OLS model
@@ -140,7 +148,7 @@ class ols():
         Inputs
         y: n by 1 vector-like, outcome variable
         X: n by k matrix-like, RHS variables
-        cluster: n by 1 vector-like or None, cluster IDs
+        clusters: n by 1 vector-like or None, cluster IDs
         names_X: length n list or None, names for variables in X. If names_X is
                  None and X is a pandas DataFrame or Series, column names will
                  be used.
@@ -223,7 +231,12 @@ class ols():
         # Instantiate data matrices
         #
         # Start by instantiating the X data as is
-        self.X = cvec(X)
+        if np.ndim(X) == 1:
+            # For one dimensional X, make sure this is a proper vector
+            self.X = cvec(X)
+        else:
+            # Otherwise, make sure it's a proper NumPy array
+            self.X = np.array(X)
 
         # Check whether to add an intercept
         if self.add_icept:
@@ -237,7 +250,7 @@ class ols():
             self.names_X = [self.name_gen_icept] + list(self.names_X)
 
         # For speed considerations, make sure these are self.fprec types
-        self.X = np.array(self.X).astype(self.fprec)
+        self.X = self.X.astype(self.fprec)
 
         # Get number of observations n and variables p
         self.n, self.k = self.X.shape
@@ -247,11 +260,13 @@ class ols():
 
         # Check whether a cluster variable was provided
         if clusters is not None:
-            # If so, adjust the cluster variable (here, using integers makes
-            # sense, because these might be used as an indexer at some point)
-            #
-            # Removed integer conversion to deal with string data
-            self.clustvar = cvec(clusters)#.astype(np.int)
+            # If so, adjust the cluster variable
+            self.clustvar = cvec(clusters)
+        else:
+            # Otherwise, adjust the clusters to again be None (in case the same
+            # model is fit and refit with and without providing clusters, for
+            # example)
+            self.clustvar = None
 
         # Calculate X'X
         self.XX = self.X.T @ self.X
@@ -261,14 +276,14 @@ class ols():
         # This may fail if that matrix is not invertible, so use try-except
         try:
             # Get the inverse
-            self.XXinv = scipy.linalg.inv(self.XX)
+            self.XXinv = scl.inv(self.XX)
         # Catch linear algebra errors
         except np.linalg.LinAlgError as e:
             # Check whether the error was due to a singular X'X matrix
             if 'singular matrix' in str(e):
                 # If so, use the Moore-Penrose pseudo inverse for real Hermitian
                 # matrices
-                self.XXinv = scipy.linalg.pinvh(self.XX)
+                self.XXinv = scl.pinvh(self.XX)
 
                 # Check whether to be talkative
                 if self.verbose:
@@ -338,25 +353,29 @@ class ols():
         # Check whether covariance_estimator was changed from the default None
         if covariance_estimator is not None:
             # If so, set cov_est to the specified covariance estimator
-            self.cov_est = covariance_estimator
+            cov_est = covariance_estimator
 
         # Otherwise, check whether the original value provided to __init__() was
         # left at the default None, and no cluster IDs were provided
         elif (self.cov_est is None) and (self.clustvar is None):
             # If so, use HC1 as the default covariance estimator
-            self.cov_est = 'hc1'
+            cov_est = 'hc1'
 
         # Otherwise, check whether the original value provided to __init__() was
         # left at the default None, and cluster IDs were provided
         elif (self.cov_est is None) and (self.clustvar is not None):
             # If so, use clustered standard errors
-            self.cov_est = 'cluster'
+            cov_est = 'cluster'
+
+        else:
+            # Otherwise, use the specified covariance estimator
+            cov_est = self.cov_est
 
         # Check whether clusters were provided, but a non-clustered covariance
         # estimator is being used, and the class is set to be talkative
         if (
                 (self.clustvar is not None)
-                and (self.cov_est != 'cluster')
+                and (cov_est != 'cluster')
                 and self.verbose
         ):
             print('\nNote in ols(): Cluster IDs were provided, but a',
@@ -365,7 +384,7 @@ class ols():
         # Check which covariance estimator to use
         #
         # Homoskedastic
-        if self.cov_est.lower() == 'homoskedastic':
+        if cov_est.lower() == 'homoskedastic':
             # For the homoskedastic estimator, just calculate the standard
             # variance
             self.V_hat = (
@@ -374,7 +393,7 @@ class ols():
             )
 
         # HC1
-        elif self.cov_est.lower() == 'hc1':
+        elif cov_est.lower() == 'hc1':
             # Calculate component of middle part of EHW sandwich,
             # S_i = X_i u_i, which makes it very easy to calculate
             # sum_i X_i X_i' u_i^2 = S'S
@@ -387,7 +406,7 @@ class ols():
             )
 
         # Clustered errors
-        elif self.cov_est.lower() == 'cluster':
+        elif cov_est.lower() == 'cluster':
             # Calculate number of clusters
             J = len(np.unique(self.clustvar[:,0]))
 
@@ -399,7 +418,7 @@ class ols():
             S = S.groupby(self.clustvar[:,0], axis=0).sum()
 
             # Convert back to a NumPy array
-            S = np.array(S).astype(np.float32)
+            S = np.array(S).astype(self.fprec)
 
             # Calculate cluster-robust variance estimator
             self.V_hat = (
@@ -447,7 +466,7 @@ class ols():
         quants = [self.level/2, 1 - self.level/2]
 
         # Make a row vector of critical values
-        cval = cvec(norm.ppf(quants)).astype(self.fprec).T
+        cval = cvec(scs.norm.ppf(quants)).astype(self.fprec).T
 
         # Calculate confidence intervals
         self.ci = (
@@ -464,7 +483,7 @@ class ols():
     def ols_p(self):
         """ Calculate p-values """
         # Calculate p-values
-        self.p = 2 * (1 - norm.cdf(np.abs(self.t)))
+        self.p = 2 * (1 - scs.norm.cdf(np.abs(self.t)))
 
 
     # Define a function to return a 'classic' regression table
@@ -493,30 +512,208 @@ class ols():
 
 
     # Define a function which calculates fitted values
-    def predict(self, X=None):
+    def predict(self, X=None, add_intercept=None):
         """ Calculate fitted values """
+
+        if add_intercept is not None:
+            add_icept = add_intercept
+        else:
+            add_icept = self.add_icept
 
         # Check whether X data were provided
         if X is not None:
             # If so, use those
-            self.predict_X = cvec(X)
+            if np.ndim(X) == 1:
+                predict_X = cvec(X)
+            else:
+                predict_X = np.array(X)
+
+            # Check whether an intercept needs to be added
+            if add_icept:
+                # If so, set up an intercept
+                cons = np.ones(shape=(predict_X.shape[0], 1))
+
+                # Add it to the data matrix
+                predict_X = np.concatenate([cons, predict_X], axis=1)
+
+            predict_X = predict_X.astype(self.fprec)
         else:
             # Otherwise, use the existing data
-            self.predict_X = self.X
-
-        # Check whether an intercept needs to be added
-        if self.add_icept:
-            # If so, set up an intercept
-            cons = np.ones(shape=(self.predict_X.shape[0], 1))
-
-            # Add it to the data matrix
-            self.predict_X = np.concatenate([cons, self.predict_X], axis=1)
+            predict_X = self.X
 
         # Get fitted values
-        self.y_hat = self.predict_X @ self.coef
+        self.y_hat = predict_X @ self.coef
 
         # Return them
         return self.y_hat
+
+
+    # Define a function to calculate the R-squared
+    def score(self, X=None, y=None):
+        """ Calculate R-squared """
+
+        # Check whether X data were provided
+        if X is not None:
+            # If so, use those
+            if np.ndim(X) == 1:
+                score_X = cvec(X)
+            else:
+                score_X = np.array(X)
+
+            # Check whether an intercept needs to be added
+            if self.add_icept:
+                # If so, set up an intercept
+                cons = np.ones(shape=(score_X.shape[0], 1))
+
+                # Add it to the data matrix
+                score_X = np.concatenate([cons, score_X], axis=1)
+
+            # Make sure the data have the right precision
+            score_X = score_X.astype(self.fprec)
+        else:
+            # Otherwise, use the existing data
+            score_X = self.X
+
+        # Check whether y data were provided
+        if y is not None:
+            # If so, use those
+            score_y = cvec(y)
+        else:
+            # Otherwise, use the existing data
+            score_y = self.y
+
+        # Get fitted values at X
+        y_hat = self.predict(score_X, add_intercept=False)
+
+        # Calculate residual sum of squares
+        SSR = ((score_y - y_hat) ** 2).sum()
+
+        # Calculate total sum of squares
+        SST = ((score_y - score_y.mean()) ** 2).sum()
+
+        # Calculate R-squared
+        self.R2 = 1 - (SSR / SST)
+
+        # Return it
+        return self.R2
+
+
+    # Define a function to calculate a Wald test (e.g. of joint significance)
+    def wald(self, jointsig=None, R=None, b=None):
+        """ Calculate a Wald test
+
+        The Wald test can be used to test linear restrictions of the form
+
+        R @ beta = b
+
+        where R is a matrix of restrictions, beta are the true coefficients of
+        the underlying model, and b is a hypothesis about the value of their
+        linear combination
+
+        Inputs
+        jointsig: list-like, either Boolean, 0-1 integer or strings, or None;
+                  denotes variables to be used for a joint significance test.
+                  If this is s a string-type, it has to contain names of
+                  variables which appear in self.names_X. Those variables will
+                  be tested. If it is a Boolean or 0-1 integer, it has to be of
+                  length k, and all True or 1 elements denote variables which
+                  will be tested. If this is not None, the R matrix will pick
+                  out the indicated elements of beta.
+        R: q by k matrix-like or None; first part of linear restrictions being
+           imposed on the model. If R is not None, this matrix will be used. (If
+           R is not None and jointsig is not None, jointsig will be ignored.)
+        b: q by 1 vector-like or None; second part of linear restrictions being
+           tested. If this is None, b will be a vector of zeroes.
+
+        Outputs
+        self.waldtable: 2 by 1 DataFrame, containing Wald statistic and
+                        associated p-value
+        """
+
+        # Check whether a joint significance test was specified
+        if jointsig is not None:
+            # If so, make sure the joint significance variables are a one
+            # dimensional array (so I can iterate over them if necessary)
+            jointsig = np.array(jointsig).flatten()
+
+            # Check whether jointsign is a list of strings
+            if isinstance(jointsig[0], str):
+                # If so, get the associated variables
+                Rbase = (
+                    np.array([1 if v in jointsig else 0 for v in self.names_X])
+                )
+            else:
+                # Otherwise, check whether an intercept needs to be added
+                if self.add_icept:
+                    # If so, add a zero at the beginning of jointsig
+                    jointsig = np.array([0] + [j for j in jointsig])
+
+                # Make sure jointsig is recorded as an integer array
+                Rbase = jointsig.astype(int)
+
+        # Alternatively, check whether R is None
+        elif R is None:
+            # If so, set up an array indicating that all variables need to be
+            # restricted (that is, an array of all ones)
+            Rbase = np.ones(shape=(self.X.shape[1]))
+
+        # Check whether the restriction matrix R was left at its default None
+        if R is None:
+            # If so, set up a matrix of restrictions as a diagonal matrix
+            R = np.diag(Rbase)
+
+            # Keep only those rows corresponding to variables which are being
+            # restricted
+            R = R[Rbase != 0, :]
+
+        # Alternatively, check whether an intercept needs to be added
+        elif self.add_icept:
+            # If so, add a column of zeros to the beginning of the restriction
+            # matrix
+            R = np.concatenate([np.zeros(shape=(R.shape[0], 1)), R], axis=1)
+
+        # Either way, ensure restriction matrix has the correct precision
+        R = R.astype(self.fprec)
+
+        # Check whether null values were provided
+        if b is None:
+            # If not, use the default null of everything being zero
+            b = np.zeros(shape=(R.shape[0], 1)).astype(self.fprec)
+        else:
+            # Otherwise, just ensure b is a proper vector
+            b = cvec(b)
+
+        # Either way, make sure b has the correct precision
+        b = b.astype(self.fprec)
+
+        # Calculate Wald statistic
+        #
+        # Calculate outer parts of the Wald 'sandwich'
+        Rbdiff = R @ self.coef - b
+
+        # Calculate Wald statistic
+        self.W = (
+            Rbdiff.T @ scl.inv(R @ self.V_hat @ R.T) @ Rbdiff
+        )
+
+        # Calculate p-value
+        #
+        # Get rank of restriction matrix
+        r = np.linalg.matrix_rank(R)
+
+        # Calculate p-value using the appropriate chi-squared distribution
+        self.pW = 1 - scs.chi2(df=r).cdf(self.W)
+
+        # Make a table containing the result
+        self.waldtable = (
+            pd.DataFrame(np.concatenate([self.W, self.pW], axis=0),
+                         index=['Wald statistic', 'p-value'],
+                         columns=['Estimate'])
+        )
+
+        # Return the Wald statistic and associated p-value
+        return self.waldtable
+
 
     # Define a function which generates a new draw of data (for bootstrapping)
     def simulate(self, residuals, X=None, coef=None):
@@ -525,26 +722,49 @@ class ols():
         # Check whether coef was left at the default None
         if coef is None:
             # If so, set the simulation coefficients to the fitted coefficients
-            self.sim_coef = self.coef
+            sim_coef = self.coef
         else:
             # Otherwise, set the simulation coefficients to a proper column
             # vector based on coef
-            self.sim_coef = cvec(coef).astype(self.fprec)
+            sim_coef = cvec(coef).astype(self.fprec)
 
         # Check whether X was left at the default None
         if X is None:
             # If so, set the simulation X to the existing data
-            self.sim_X = self.X
+            sim_X = self.X
         else:
-            # Otherwise, set the simulation X to the provided data, but make
-            # sure they're a 32 bit NumPy array
-            self.sim_X = np.array(X).astype(self.fprec)
+            # Otherwise, use the provided data
+            if np.ndim(X) == 1:
+                sim_X = cvec(X)
+            else:
+                sim_X = np.array(X)
+
+            # Check whether an intercept needs to be added
+            if self.add_icept:
+                # If so, set up an intercept
+                cons = np.ones(shape=(sim_X.shape[0], 1))
+
+                # Add it to the data matrix
+                sim_X = np.concatenate([cons, sim_X], axis=1)
+
+            # Make sure the data have the right precision
+            sim_X = sim_X.astype(self.fprec)
 
         # Adjust the simulation residuals
-        self.sim_residuals = cvec(residuals).astype(self.fprec)
+        sim_residuals = cvec(residuals).astype(self.fprec)
 
         # Generate simulated data
-        self.sim_y = self.sim_X @ self.sim_coef + self.sim_residuals
+        self.sim_y = sim_X @ sim_coef + sim_residuals
 
         # Return the result
         return self.sim_y
+
+
+    # Define a dummy method set_params(), so this can be used with that has such
+    # functionality (e.g. scikit-learn). I might later expand this to be an
+    # actual method, although it should not be necessary.
+    def set_params(self, *args, **kwargs):
+        """ Dummy method which does nothing """
+
+        # Do nothing
+        pass
