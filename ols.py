@@ -1,4 +1,8 @@
 ################################################################################
+### Define OLS class
+################################################################################
+
+################################################################################
 ### 1: Setup
 ################################################################################
 
@@ -17,7 +21,7 @@ from scipy.stats import norm
 # Currently, there are none
 
 ################################################################################
-### 3: Regression models
+### 3: Define OLS class
 ################################################################################
 
 
@@ -127,7 +131,7 @@ class ols():
         # Variables created by self.score()
         self.R2 = None
 
-        # Variable created by self.wald()
+        # Variables created by self.wald()
         self.W = None
         self.pW = None
         self.waldtable = None
@@ -142,7 +146,7 @@ class ols():
     # Define a function to fit the model
     def fit(self, X, y, clusters=None, names_X=None, name_y=None,
             name_gen_X=None, name_gen_y=None, add_intercept=None,
-            coef_only=None):
+            coef_only=None, **kwargs_wald):
         """ Fit OLS model
 
         Inputs
@@ -262,7 +266,7 @@ class ols():
         if clusters is not None:
             # If so, adjust the cluster variable
             self.clustvar = cvec(clusters)
-        else:
+        elif self.cov_est != 'cluster':
             # Otherwise, adjust the clusters to again be None (in case the same
             # model is fit and refit with and without providing clusters, for
             # example)
@@ -271,35 +275,12 @@ class ols():
         # Calculate X'X
         self.XX = self.X.T @ self.X
 
-        # OLD
-        #
         # Calculate (X'X)^(-1)
-        #
-        # This may fail if that matrix is not invertible, so use try-except
-        #try:
-            # Get the inverse
-        #    self.XXinv = scl.inv(self.XX)
-        # Catch linear algebra errors
-        #except np.linalg.LinAlgError as e:
-            # Check whether the error was due to a singular X'X matrix
-        #    if 'singular matrix' in str(e):
-                # If so, use the Moore-Penrose pseudo inverse for real Hermitian
-                # matrices
-        #        self.XXinv = scl.pinv2(self.XX)
-
-                # Check whether to be talkative
-        #        if self.verbose:
-        #            print("\nNote in ols.ols_cov(): X'X matrix was not",
-        #                  'invertible, Moore-Penrose pseudo-inverse had to be'
-        #                  'used')
-
-        # NEW
-        #
-        # Calculate (X'X)^(-1)
-        self.XXinv = scl.pinv2(self.XX)
+        self.XXinv = scl.pinv(self.XX)
 
         # Calculate coefficient vector
-        self.coef = self.XXinv @ (self.X.T @ self.y)
+        #self.coef = self.XXinv @ (self.X @ self.y)
+        self.coef = cvec(scl.lstsq(self.X, self.y)[0]).astype(self.fprec)
 
         # Get residuals
         self.U_hat = self.y - self.X @ self.coef
@@ -317,9 +298,12 @@ class ols():
 
             # Get p-values
             self.ols_p()
+
+            # Do a Wald test
+            self.wald(**kwargs_wald)
         else:
             # Otherwise, set all other results to NAN. (This is important for
-            # coef_only=True to provided a speed-up. If this does not happen,
+            # coef_only=True to provide a speed-up. If this does not happen,
             # some of the pandas DataFrames containing results are created
             # automatically, and automatically inferring their shape and size
             # takes a while. Without pre-setting these here, coef_only=True
@@ -343,6 +327,10 @@ class ols():
                                columns=self.names_ci),
             'level': self.level,
             'p': pd.DataFrame(self.p, index=self.names_X, columns=['p-value']),
+            'wald': pd.DataFrame(self.W, index=['Wald statistic'],
+                                 columns=['Value']),
+            'wald p': pd.DataFrame(self.pW, index=['Wald p-value'],
+                                   columns=['Values']),
             'covariance matrix': pd.DataFrame(self.V_hat, index=self.names_X,
                                               columns=self.names_X),
             'residuals': pd.DataFrame(self.U_hat, columns=['Residuals']),
@@ -474,7 +462,7 @@ class ols():
         quants = [self.level/2, 1 - self.level/2]
 
         # Make a row vector of critical values
-        cval = cvec(scs.norm.ppf(quants)).astype(self.fprec).T
+        cval = cvec(scs.t(df=self.n-self.k).ppf(quants)).astype(self.fprec).T
 
         # Calculate confidence intervals
         self.ci = (
@@ -585,12 +573,12 @@ class ols():
         # Check whether y data were provided
         if y is not None:
             # If so, use those
-            score_y = cvec(y)
+            score_y = cvec(y).astype(self.fprec)
         else:
             # Otherwise, use the existing data
             score_y = self.y
 
-        # Get fitted values at X
+        # Get fitted values at score_X
         y_hat = self.predict(score_X, add_intercept=False)
 
         # Calculate residual sum of squares
@@ -607,7 +595,7 @@ class ols():
 
 
     # Define a function to calculate a Wald test (e.g. of joint significance)
-    def wald(self, jointsig=None, R=None, b=None):
+    def wald(self, jointsig=None, R=None, b=None, V_hat=None):
         """ Calculate a Wald test
 
         The Wald test can be used to test linear restrictions of the form
@@ -632,12 +620,16 @@ class ols():
            R is not None and jointsig is not None, jointsig will be ignored.)
         b: q by 1 vector-like or None; second part of linear restrictions being
            tested. If this is None, b will be a vector of zeroes.
+        V_hat: k by k matrix-like or None; covariance matrix to use for
+               calculating the Wald Statistic. If this is None, the model's
+               estimated covariance matrix self.V_hat will be used.
 
         Outputs
         self.waldtable: 2 by 1 DataFrame, containing Wald statistic and
                         associated p-value
         """
-
+        # Instantiate LHS restrictions matrix
+        #
         # Check whether a joint significance test was specified
         if jointsig is not None:
             # If so, make sure the joint significance variables are a one
@@ -652,7 +644,7 @@ class ols():
                 )
             else:
                 # Otherwise, check whether an intercept needs to be added
-                if self.add_icept:
+                if self.add_icept or (self.k == len(jointsig) + 1):
                     # If so, add a zero at the beginning of jointsig
                     jointsig = np.array([0] + [j for j in jointsig])
 
@@ -663,7 +655,7 @@ class ols():
         elif R is None:
             # If so, set up an array indicating that all variables need to be
             # restricted (that is, an array of all ones)
-            Rbase = np.ones(shape=(self.X.shape[1]))
+            Rbase = np.ones(shape=(self.k))
 
         # Check whether the restriction matrix R was left at its default None
         if R is None:
@@ -683,6 +675,8 @@ class ols():
         # Either way, ensure restriction matrix has the correct precision
         R = R.astype(self.fprec)
 
+        # Instantiate RHS null vector
+        #
         # Check whether null values were provided
         if b is None:
             # If not, use the default null of everything being zero
@@ -694,41 +688,23 @@ class ols():
         # Either way, make sure b has the correct precision
         b = b.astype(self.fprec)
 
+        # Instantiate covariance matrix
+        #
+        # Check whether a covariance matrix was provided
+        if V_hat is not None:
+            # If so, use that
+            V = np.array(V_hat).astype(self.fprec)
+        else:
+            # Otherwise, use the estimated covariance matrix
+            V = self.V_hat
+
         # Calculate Wald statistic
         #
         # Calculate outer parts of the Wald 'sandwich', R beta - b
         Rbdiff = R @ self.coef - b
 
-        # OLD
-        #
-        # Calculate inner part of the Wald 'sandwich', RVR'
-        #
-        # This may fail if that matrix is not invertible, so use try-except
-        #try:
-            # Get the inverse
-        #    RVRinv = scl.inv(R @ self.V_hat @ R.T)
-
-            # Calculate the Wald statistic
-        #    self.W = Rbdiff.T @ RVRinv @ Rbdiff
-
-        # Catch linear algebra errors
-        #except np.linalg.LinAlgError as e:
-            # Check whether the error was due to a singular X'X matrix
-        #    if 'singular matrix' in str(e):
-                # If so, use the Moore-Penrose pseudo inverse for real Hermitian
-                # matrices
-        #        RVRinv = scl.pinv2(R @ self.V_hat @ R.T)
-
-                # Check whether to be talkative
-        #        if self.verbose:
-        #            print("\nNote in ols.wald(): RVR' matrix was not",
-        #                  'invertible, Moore-Penrose pseudo-inverse had to be',
-        #                  'used')
-
-        # NEW
-        #
-        # Calculate inner part of the Wald 'sandwich', RVR'
-        RVRinv = scl.pinv2(R @ self.V_hat @ R.T)
+        # Calculate inner part of the Wald 'sandwich', (RVR')^(-1)
+        RVRinv = scl.pinv(R @ V @ R.T)
 
         # Calculate the Wald statistic
         self.W = Rbdiff.T @ RVRinv @ Rbdiff

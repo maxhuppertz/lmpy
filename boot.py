@@ -8,8 +8,9 @@ import joblib as jbl
 import numpy as np
 import pandas as pd
 import scipy.stats
+import sklearn.preprocessing as skp
 from hdmpy import cvec
-from lmpy import ols
+from lmpy.ols import ols
 from multiprocessing import cpu_count
 
 ################################################################################
@@ -28,7 +29,8 @@ from multiprocessing import cpu_count
 
 
 # Define one iteration of the pairs bootstrap algorithm
-def _b_iter_pairs(model, bootstrap_stat='coefficients', seed=0, fix_seed=True):
+def _b_iter_pairs(model, bootstrap_stat='coefficients', seed=0, fix_seed=True,
+                  **kwargs_fit):
     """ Run one iteration of the pairs bootstrap
 
     Inputs
@@ -70,7 +72,8 @@ def _b_iter_pairs(model, bootstrap_stat='coefficients', seed=0, fix_seed=True):
     ystar = y[idx,:]
 
     # Fit the model
-    model.fit(y=ystar, X=Xstar, add_intercept=False)
+    model.fit(y=ystar, X=Xstar, add_intercept=False, names_X=model.names_X,
+              name_y=model.name_y, **kwargs_fit)
 
     # Get the estimated coefficients
     res = cvec(model.est[bootstrap_stat])
@@ -81,7 +84,7 @@ def _b_iter_pairs(model, bootstrap_stat='coefficients', seed=0, fix_seed=True):
 
 # Define one iteration of a wild bootstrap
 def _b_iter_wild(model_res, model, bootstrap_stat='coefficients', eta=1, seed=0,
-                 fix_seed=True):
+                 fix_seed=True, **kwargs_fit):
     """ Run one iteration of the wild bootstrap
 
     Inputs
@@ -138,7 +141,8 @@ def _b_iter_wild(model_res, model, bootstrap_stat='coefficients', eta=1, seed=0,
     ystar = model_res.simulate(residuals=U_hatstar)
 
     # Fit the unrestricted model to the bootstrap sample
-    model.fit(y=ystar, X=X, add_intercept=False)
+    model.fit(y=ystar, X=X, add_intercept=False, names_X=model.names_X,
+              name_y=model.name_y, **kwargs_fit)
 
     # Get the estimated statistics
     res = cvec(model.est[bootstrap_stat])
@@ -149,7 +153,7 @@ def _b_iter_wild(model_res, model, bootstrap_stat='coefficients', eta=1, seed=0,
 # Define one iteration of the Cameron, Gelbach, and Miller (2008) cluster robust
 # wild bootstrap
 def _b_iter_cgm(model_res, model, bootstrap_stat='coefficients', eta=1, seed=0,
-                fix_seed=True):
+                fix_seed=True, labencode=skp.LabelEncoder(), **kwargs_fit):
     """ Run one iteration of the Cameron, Gelbach, and Miller (2008) bootstrap
 
     Inputs
@@ -177,10 +181,10 @@ def _b_iter_cgm(model_res, model, bootstrap_stat='coefficients', eta=1, seed=0,
     U_hat_res = model_res.est['residuals']
 
     # Get X from the unrestricted model
-    X = model.X
+    X = pd.DataFrame(model.X, columns=model.names_X)
 
     # Get cluster variable (doesn't matter from which model)
-    clustvar = model_res.clustvar
+    clustvar = cvec(labencode.fit_transform(model.clustvar.flatten()))
 
     # Get the number of clusters in the data
     J = len(np.unique(clustvar))
@@ -212,7 +216,8 @@ def _b_iter_cgm(model_res, model, bootstrap_stat='coefficients', eta=1, seed=0,
     ystar = model_res.simulate(residuals=U_hatstar)
 
     # Fit the unrestricted model to the bootstrap sample
-    model.fit(y=ystar, X=X, add_intercept=False)
+    model.fit(y=ystar, X=X, add_intercept=False,  names_X=model.names_X,
+              name_y=model.name_y, **kwargs_fit)
 
     # Get the estimated statistics
     res = cvec(model.est[bootstrap_stat])
@@ -231,8 +236,9 @@ class boot():
     # Define initialization function
     def __init__(self, model=ols, y=None, X=None, algorithm='pairs',
                  impose_null_idx=None, eta=1, bootstrap_stat='t', level=None,
-                 B=4999, par=True, corecap=np.inf, fix_seed=True,
-                 batch_size='auto', verbose=True, fprec=np.float32, nround=4):
+                 one_sided=None, B=4999, par=True, corecap=np.inf,
+                 fix_seed=True, batch_size='auto', verbose=True,
+                 fprec=np.float32, nround=4, **kwargs_fit):
         """ Initialize boot class
 
         Inputs
@@ -261,6 +267,9 @@ class boot():
                         estimates model.est. Statistics to bootstrap.
         level: Scalar or None, if None, uses model.level as default. Level for
                confidence intervals to construct.
+        one_sided: Boolean or None, whether to construct one-sided confidence
+                   intervals; if None, uses reasonable defaults, see
+                   self.get_ci()
         B: Positive integer, number of bootstrap iterations to use
         par: Boolean, if True, runs bootstrap iterations in parallel
         corecap: Integer of np.inf, maximum number of cores to use. Setting this
@@ -282,6 +291,39 @@ class boot():
         # Instantiate model to use for bootstrapping
         self.model = cp.deepcopy(model)
 
+        # Instantiate verbosity parameter
+        self.verbose = verbose
+
+        # Check whether the model is an OLS model
+        if isinstance(self.model, ols):
+            # Check whether clusters were provided, but the covariance estimator
+            # was not specified, and clusters were not provided in kwargs_fit
+            if (
+                    self.model.clustvar is not None
+                    and self.model.cov_est is None
+                    and 'clusters' not in kwargs_fit.keys()
+            ):
+                # If so, specify it. (The reason I do this is because the model
+                # will be fit many times during the bootstrap loop. If no
+                # covariance estimator is specified, OLS sets self.clustvar to
+                # None if clusters are not provided in ols.fit(). This behavior
+                # helps handling certain use cases, but for bootstrapping, the
+                # covariance estimator has to be specified to be prevent cluster
+                # information being lost. An alternative is to specify clusters
+                # in **kwargs_fit.)
+                self.model.cov_est = 'cluster'
+
+                # Check whether to be talkative
+                if self.verbose:
+                    # If so, display a note
+                    print('\nNote in boot(): The provided model contains a',
+                          'cluster ID variable (self.clustvar), but',
+                          'covariance_estimator is None, and **kwargs_fit',
+                          'does not provide cluster IDs. Everything should be',
+                          'fine, but it is recommended to either specify the',
+                          'covariance estimator, or to provide cluster IDs',
+                          'via **kwargs_fit.')
+
         # Check whether the model came pre fitted
         if self.model.est is None:
             # Check whether data were provided
@@ -293,10 +335,7 @@ class boot():
                                  + 'complete data')
             else:
                 # If they were provided, fit the model
-                self.model.fit(y, X)
-
-        # Instantiate verbosity parameter
-        self.verbose = verbose
+                self.model.fit(X, y, **kwargs_fit)
 
         # Instantiate float precision data type
         self.fprec = fprec
@@ -337,6 +376,7 @@ class boot():
             self.level = level
         else:
             self.level = self.model.level
+        self.one_sided = one_sided
 
         # Instantiate parameters for self.summarize() results
         self.nround = nround
@@ -357,9 +397,12 @@ class boot():
         # Variables created by self.summarize()
         self.regtable = None
 
+        # Variables created by self.boot_cov()
+        self.V_hat_boot = None
+
         # Run functions to get bootstrapped confidence interval
         # Get bootstrap distribution
-        self.bootstrap_distribution()
+        self.bootstrap_distribution(**kwargs_fit)
 
         # Get confidence intervals
         self.get_ci()
@@ -367,7 +410,7 @@ class boot():
         # Combine results into a dictionary
         self.est = {
             'original estimates': self.model.est[self.stat],
-            'ci': pd.DataFrame(self.ci, index=self.model.names_X,
+            'ci': pd.DataFrame(self.ci, index=self.model.est[self.stat].index,
                                columns=self.names_ci),
             'statistic': self.stat,
             'B': self.B,
@@ -384,7 +427,7 @@ class boot():
 
 
     # Define function to run different bootstrapping algorithms
-    def bootstrap_distribution(self):
+    def bootstrap_distribution(self, **kwargs_fit):
         """ Get bootstrap distribution  """
         # Get data from the model
         self.X = self.model.X
@@ -416,7 +459,8 @@ class boot():
             self.model_res = cp.deepcopy(self.model)
 
             # Fit the restricted model
-            self.model_res.fit(self.y, self.X_res, add_intercept=False)
+            self.model_res.fit(self.X_res, self.y, add_intercept=False,
+                               coef_only=True, **kwargs_fit)
         else:
             # Otherwise, set self.model_res to self.model, so this can easily be
             # passed to algorithms which could have a null imposed
@@ -440,7 +484,7 @@ class boot():
                 jbl.Parallel(n_jobs=self.n_cores, batch_size=self.batch_size)(
                     jbl.delayed(_b_iter_pairs)(
                         model=self.model, bootstrap_stat=self.stat, seed=b,
-                        fix_seed=self.fix_seed)
+                        fix_seed=self.fix_seed, **kwargs_fit)
                     for b in np.arange(self.B)
                 )
             )
@@ -453,7 +497,7 @@ class boot():
                     jbl.delayed(_b_iter_wild)(
                         model_res=self.model_res, model=self.model,
                         bootstrap_stat=self.stat, eta=self.eta, seed=b,
-                        fix_seed=self.fix_seed)
+                        fix_seed=self.fix_seed, **kwargs_fit)
                     for b in np.arange(self.B)
                 )
             )
@@ -466,7 +510,7 @@ class boot():
                     jbl.delayed(_b_iter_cgm)(
                         model_res=self.model_res, model=self.model,
                         bootstrap_stat=self.stat, eta=self.eta,
-                        seed=b, fix_seed=self.fix_seed)
+                        seed=b, fix_seed=self.fix_seed, **kwargs_fit)
                     for b in np.arange(self.B)
                 )
             )
@@ -483,13 +527,48 @@ class boot():
 
 
     # Define a function to calculate bootstrapped confidence intervals
-    def get_ci(self):
+    def get_ci(self, one_sided=None):
         """ Get bootstrapped confidence interval """
+        # Set one sided parameter
+        #
+        # If one was provided ...
+        if one_sided is not None:
+            # ... continue as is
+            pass
+
+        # Otherwise, if one was set in __init__() ...
+        elif self.one_sided is not None:
+            # ... use that
+            one_sided = self.one_sided
+
+        # Otherwise, if this is bootstrapping a Wald statistic ...
+        elif self.stat in ['wald']:
+            # ... use an upper one sided test
+            one_sided = 'upper'
+
+        # Otherwise ...
+        else:
+            # ... use a two sided test
+            one_sided = False
+
         # Get quantiles to compute
-        quants = [self.level/2, 1 - self.level/2]
+        if one_sided == 'upper':
+            quants = [0, 1 - self.level]
+        elif one_sided == 'lower':
+            quants = [self.level, 1]
+        else:
+            quants = [self.level/2, 1 - self.level/2]
 
         # Get the confidence intervals
         self.ci = np.quantile(self.bsamps, quants, axis=1).T.astype(self.fprec)
+
+        # Replace upper or lower bounds if applicable
+        if (one_sided == 'upper') and self.stat in ['wald']:
+            self.ci[:,0] = 0
+        elif one_sided == 'upper':
+            self.ci[:,0] = -np.inf
+        elif one_sided == 'lower':
+            self.ci[:,1] = np.inf
 
         # Make a two element list of names for the upper and lower bound
         self.names_ci = ['{}%'.format(q*100) for q in quants]
@@ -508,7 +587,10 @@ class boot():
         )
 
         # Add null imposed information if applicable
-        if self.impose_null_idx is not None:
+        if (
+                (self.impose_null_idx is not None)
+                and (self.impose_null_idx.shape[0] == self.regtable.shape[0])
+        ):
             self.regtable = (
                 pd.concat([self.regtable, self.est['null imposed']], axis=1)
             )
@@ -521,3 +603,51 @@ class boot():
 
         # Return the result, to make it easily printable
         return self.regtable
+
+
+    # Define a function to calculate the covariance matrix across bootstrap
+    # samples
+    def boot_cov(self):
+        """ Calculate covariance matrix of bootstrapped statistics """
+        # Calculate covariance
+        self.V_hat_boot = np.cov(self.bsamps, rowvar=True)
+
+
+    # Define a function to run Wald test
+    def wald(self, jointsig=None, R=None, b=None):
+        """ Run a Wald test
+
+        First run boot_cov(), then use this to calculate a Wald statistic. Note
+        that this is usually not a good idea, since using the bootstrap to
+        estimate statistics, rather than the distribution of a pivot, does not
+        provide any asymptotic refinements over analytical methods. The only
+        real use case is if the covariance matrix of the underlying model is too
+        complicated to be estimated analytically.
+
+        Inputs
+        jointsig, R, b: See self.model's documentation
+
+        Outputs
+        self.model.waldtable, see self.model's documentation
+        """
+        # Check whether self.boot_cov() has been run
+        if self.V_hat_boot is not None:
+            # If so, get a Wald statistic using the bootstrapped covariance
+            # matrix
+            self.model.wald(jointsig=jointsig, R=R, b=b, V_hat=self.V_hat_boot)
+        else:
+            # Otherwise, potentially display a warning
+            if self.verbose:
+                print('\nNote in boot.wald(): Please use boot.get_cov() before',
+                      'running boot.wald(). Returning Wald statistic based on',
+                      'model covariance instead.')
+
+            # Just get the Wald statistic from the underlying model
+            self.model.wald(jointsig=jointsig, R=R, b=b)
+
+        # Save the results
+        self.W_boot = self.model.W
+        self.pW_boot = self.model.pW
+
+        # Return the summary table
+        return self.model.waldtable
