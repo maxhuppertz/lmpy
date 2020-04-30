@@ -272,21 +272,25 @@ class ols():
             # example)
             self.clustvar = None
 
-        # Calculate X'X
-        self.XX = self.X.T @ self.X
-
-        # Calculate (X'X)^(-1)
-        self.XXinv = scl.pinv(self.XX)
-
         # Calculate coefficient vector
         #self.coef = self.XXinv @ (self.X @ self.y)
         self.coef = cvec(scl.lstsq(self.X, self.y)[0]).astype(self.fprec)
 
-        # Get residuals
-        self.U_hat = self.y - self.X @ self.coef
-
         # Check whether to calculate anything besides the coefficients
         if not self.coef_only:
+            # Calculate some inputs for covariance estimators
+            #
+            # Calculate X'X
+            self.XX = self.X.T @ self.X
+
+            # Calculate (X'X)^(-1)
+            self.XXinv = scl.pinv(self.XX)
+
+            # Get residuals
+            self.U_hat = self.y - self.X @ self.coef
+
+            # Get other elements of the OLS model
+            #
             # Get the covariance
             self.ols_cov()
 
@@ -426,11 +430,13 @@ class ols():
         else:
             # Print an error message
             raise ValueError('Error in ols.fit(): The specified covariance '
-                             + 'estimator could not be recognized; please '
+                             + 'estimator ({})'.format(cov_est)
+                             + 'could not be recognized; please '
                              + 'specify a valid estimator')
 
         # Replace NaNs as zeros (happens if division by zero occurs)
-        #self.V_hat[np.isnan(V_hat)] = 0
+        #self.V_hat[np.isnan(self.V_hat)] = 0
+        #self.V_hat[np.isinf(self.V_hat)] = 0
 
         # Calculate the standard errors for all coefficients
         self.se = cvec(np.sqrt(np.diag(self.V_hat))).astype(self.fprec)

@@ -229,6 +229,7 @@ def _b_iter_cgm(model_res, model, bootstrap_stat='coefficients', eta=1, seed=0,
 ### 4.2: Class to implement bootstrapping algorithms
 ################################################################################
 
+
 class boot():
     """ Runs bootstrap algorithms """
 
@@ -628,7 +629,7 @@ class boot():
         jointsig, R, b: See self.model's documentation
 
         Outputs
-        self.model.waldtable, see self.model's documentation
+        self.model.waldtable: See self.model's documentation
         """
         # Check whether self.boot_cov() has been run
         if self.V_hat_boot is not None:
