@@ -25,7 +25,7 @@ from scipy.stats import randint
 
 
 # Define a function to calculate the VIF for a given variable (auxiliary)
-def vif_i(X, vlhs, add_intercept):
+def vif_i(X, vlhs, add_intercept=True):
     """ Calculate the VIF for a single variable
 
     Inputs
@@ -78,6 +78,7 @@ def vif(X, cols=None, add_intercept=True, corecap=np.inf):
     Output
     VIF: len(cols) by 1 DataFrame, VIFs for all specified variables
     """
+    # Use all columns of X is cols is None
     if cols is None:
         cols = X.columns
 

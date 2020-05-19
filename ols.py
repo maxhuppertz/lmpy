@@ -33,8 +33,8 @@ class ols():
     # Define initialization function
     def __init__(self, name_gen_X='X', name_gen_y='y', add_intercept=True,
                  name_gen_icept='(Intercept)', coef_only=False,
-                 covariance_estimator=None, level=.05, verbose=True,
-                 fprec=np.float32, nround=4):
+                 no_joint=False, covariance_estimator=None, level=.05,
+                 verbose=True, fprec=np.float32, nround=4):
         """ Initialize ols() class
 
         Inputs
@@ -46,6 +46,8 @@ class ols():
         name_gen_icept: String, name to use for the intercept variable
         coef_only: Boolean, if True, the model only calculates coefficients (and
                    not the covariance matrix, which is computationally costly)
+        no_joint: Boolean, if True, the model does not (by default) calculate a
+                  Wald test of joint significane of all coefficients
         covariance_estimator: String or None, covariance estimator to use.
                               Possible choices are:
 
@@ -84,6 +86,7 @@ class ols():
         self.add_icept = add_intercept
         self.name_gen_icept = name_gen_icept
         self.coef_only = coef_only
+        self.no_joint = no_joint
 
         # Parameters for self.ols_ci()
         self.level = level
@@ -146,7 +149,7 @@ class ols():
     # Define a function to fit the model
     def fit(self, X, y, clusters=None, names_X=None, name_y=None,
             name_gen_X=None, name_gen_y=None, add_intercept=None,
-            coef_only=None, **kwargs_wald):
+            coef_only=None, no_joint=None, **kwargs_wald):
         """ Fit OLS model
 
         Inputs
@@ -166,6 +169,8 @@ class ols():
                        provided in __init()__
         coef_only: Boolean or None, see __init()__; if None, uses the value
                    provided in __init()__
+        no_joint: Boolean or None, see __init()__; if None, use the value
+                  provided in __init()__
         """
         # Check whether the generic name for X variables was changed
         if name_gen_X is not None:
@@ -186,6 +191,11 @@ class ols():
         if coef_only is not None:
             # If so, adjust it
             self.coef_only = coef_only
+
+        # Check whether the joint significance parameter was changed
+        if no_joint is not None:
+            # If so, adjust it
+            self.no_joint = no_joint
 
         # Variables names
         #
@@ -274,6 +284,7 @@ class ols():
 
         # Calculate coefficient vector
         #self.coef = self.XXinv @ (self.X @ self.y)
+
         self.coef = cvec(scl.lstsq(self.X, self.y)[0]).astype(self.fprec)
 
         # Check whether to calculate anything besides the coefficients
@@ -303,8 +314,14 @@ class ols():
             # Get p-values
             self.ols_p()
 
-            # Do a Wald test
-            self.wald(**kwargs_wald)
+            # Check whether to do a Wald test
+            if not self.no_joint:
+                # Do a Wald test
+                self.wald(**kwargs_wald)
+            else:
+                # Otherwise, set the results for that to NAN
+                self.W = np.nan
+                self.pW = np.nan
         else:
             # Otherwise, set all other results to NAN. (This is important for
             # coef_only=True to provide a speed-up. If this does not happen,
@@ -317,6 +334,8 @@ class ols():
             self.ci = np.zeros(shape=(self.k,2)) * np.nan
             self.p = np.zeros(shape=(self.k,1)) * np.nan
             self.V_hat = np.zeros(shape=(self.k,self.k)) * np.nan
+            self.W = np.nan
+            self.pW = np.nan
 
         # Combine results into a dictionary
         self.est = {
