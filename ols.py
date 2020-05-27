@@ -97,19 +97,13 @@ class ols():
         # Instantiate variables created by various methods
         #
         # Variables from ols_fit()
-        self.X = None
-        self.y = None
-        self.clustvar = None
         self.names_X = None
         self.name_y = None
-        self.XX = None
-        self.XXinv = None
         self.coef = None
         self.est = None
 
         # Variables created by self.ols_cov()
         self.cov_est = covariance_estimator
-        self.U_hat = None
         self.V_hat = None
         self.se = None
 
@@ -118,18 +112,12 @@ class ols():
 
         # Variables created by self.ols_ci()
         self.ci = None
-        self.names_ci = (
-            ['{}%'.format(q*100) for q in [self.level/2, 1 - self.level/2]]
-        )
 
         # Variables created by self.ols_p()
         self.p = None
 
         # Variables created by self.summarize()
         self.regtable = None
-
-        # Variables created by self.predict()
-        self.y_hat = None
 
         # Variables created by self.score()
         self.R2 = None
@@ -139,17 +127,11 @@ class ols():
         self.pW = None
         self.waldtable = None
 
-        # Variables created by self.simulate()
-        #self.sim_coef = None
-        #self.sim_X = None
-        #self.sim_residuals = None
-        self.sim_y = None
-
 
     # Define a function to fit the model
     def fit(self, X, y, clusters=None, names_X=None, name_y=None,
             name_gen_X=None, name_gen_y=None, add_intercept=None,
-            coef_only=None, no_joint=None, **kwargs_wald):
+            coef_only=None, no_joint=None, copy=True, **kwargs_wald):
         """ Fit OLS model
 
         Inputs
@@ -242,86 +224,84 @@ class ols():
             # ... use generic names
             self.name_y = self.name_gen_y
 
+        if copy:
+            X = X.copy()
+
         # Instantiate data matrices
         #
         # Start by instantiating the X data as is
         if np.ndim(X) == 1:
             # For one dimensional X, make sure this is a proper vector
-            self.X = cvec(X)
+            X = cvec(X)
         else:
             # Otherwise, make sure it's a proper NumPy array
-            self.X = np.array(X)
+            X = np.array(X)
 
         # Check whether to add an intercept
         if self.add_icept:
             # If so, set up an intercept
-            cons = np.ones(shape=(self.X.shape[0], 1))
+            cons = np.ones(shape=(X.shape[0], 1))
 
             # Add it to the data matrix
-            self.X = np.concatenate([cons, self.X], axis=1)
+            X = np.concatenate([cons, X], axis=1)
 
             # Add the intercept to the variables names
             self.names_X = [self.name_gen_icept] + list(self.names_X)
 
         # For speed considerations, make sure these are self.fprec types
-        self.X = self.X.astype(self.fprec)
+        X = X.astype(self.fprec)
 
         # Get number of observations n and variables p
-        self.n, self.k = self.X.shape
+        self.n, self.k = X.shape
 
         # Instantiate y data elements
-        self.y = cvec(y).astype(self.fprec)
+        fit_y = cvec(y).astype(self.fprec)
 
         # Check whether a cluster variable was provided
         if clusters is not None:
             # If so, adjust the cluster variable
-            self.clustvar = cvec(clusters)
+            clustvar = cvec(clusters)
         elif self.cov_est != 'cluster':
             # Otherwise, adjust the clusters to again be None (in case the same
             # model is fit and refit with and without providing clusters, for
             # example)
-            self.clustvar = None
+            clustvar = None
 
         # Calculate coefficient vector
-        #self.coef = self.XXinv @ (self.X @ self.y)
+        #self.coef = self.XXinv @ (X @ fit_y)
 
-        self.coef = cvec(scl.lstsq(self.X, self.y)[0]).astype(self.fprec)
+        self.coef = cvec(scl.lstsq(X, fit_y)[0]).astype(self.fprec)
 
         # Check whether to calculate anything besides the coefficients
         if not self.coef_only:
             # Calculate some inputs for covariance estimators
             #
-            # Calculate X'X
-            self.XX = self.X.T @ self.X
-
-            # Calculate (X'X)^(-1)
-            self.XXinv = scl.pinv(self.XX)
-
             # Get residuals
-            self.U_hat = self.y - self.X @ self.coef
+            U_hat = fit_y - X @ self.coef
 
             # Get other elements of the OLS model
             #
             # Get the covariance
-            self.ols_cov()
+            sedf, Vdf = self.ols_cov(X=X, residuals=U_hat, clusters=clustvar)
 
             # Get t-statistics
-            self.ols_t()
+            tdf = self.ols_t()
 
             # Get confidence intervals
-            self.ols_ci()
+            cidf = self.ols_ci()
 
             # Get p-values
-            self.ols_p()
+            pdf = self.ols_p()
 
             # Check whether to do a Wald test
             if not self.no_joint:
                 # Do a Wald test
-                self.wald(**kwargs_wald)
+                walddf = self.wald(**kwargs_wald)
+                waldstat = walddf.loc['Wald statistic', :]
+                waldp = walddf.loc['p-value', :]
             else:
-                # Otherwise, set the results for that to NAN
-                self.W = np.nan
-                self.pW = np.nan
+                waldstat = None
+                waldp = None
         else:
             # Otherwise, set all other results to NAN. (This is important for
             # coef_only=True to provide a speed-up. If this does not happen,
@@ -329,46 +309,47 @@ class ols():
             # automatically, and automatically inferring their shape and size
             # takes a while. Without pre-setting these here, coef_only=True
             # actually slows down the program.)
-            self.se = np.zeros(shape=(self.k,1)) * np.nan
-            self.t = np.zeros(shape=(self.k,1)) * np.nan
-            self.ci = np.zeros(shape=(self.k,2)) * np.nan
-            self.p = np.zeros(shape=(self.k,1)) * np.nan
-            self.V_hat = np.zeros(shape=(self.k,self.k)) * np.nan
-            self.W = np.nan
-            self.pW = np.nan
+            sedf = None
+            tdf = None
+            cidf = None
+            pdf = None
+            waldstat = None
+            waldp = None
+            Vdf = None
 
         # Combine results into a dictionary
         self.est = {
             'coefficients': pd.DataFrame(self.coef, index=self.names_X,
                                          columns=['Estimated coefficient']),
-            'se': pd.DataFrame(self.se, index=self.names_X,
-                               columns=['Standard error']),
+            'se': sedf,
             'covariance estimator': self.cov_est,
-            't': pd.DataFrame(self.t, index=self.names_X,
-                              columns=['t-statistic']),
-            'ci': pd.DataFrame(self.ci, index=self.names_X,
-                               columns=self.names_ci),
+            't': tdf,
+            'ci': cidf,
             'level': self.level,
-            'p': pd.DataFrame(self.p, index=self.names_X, columns=['p-value']),
-            'wald': pd.DataFrame(self.W, index=['Wald statistic'],
-                                 columns=['Value']),
-            'wald p': pd.DataFrame(self.pW, index=['Wald p-value'],
-                                   columns=['Values']),
-            'covariance matrix': pd.DataFrame(self.V_hat, index=self.names_X,
-                                              columns=self.names_X),
-            'residuals': pd.DataFrame(self.U_hat, columns=['Residuals']),
-            'clusters': pd.DataFrame(self.clustvar, columns=['Cluster ID'])
+            'p': pdf,
+            'wald': waldstat,
+            'wald p': waldp,
+            'covariance matrix': Vdf#,
+            #'residuals': pd.DataFrame(U_hat, columns=['Residuals']),
+            #'clusters': pd.DataFrame(clustvar, columns=['Cluster ID'])
         }
 
 
     # Define a function to calculate the covariance matrix plus standard errors
-    def ols_cov(self, covariance_estimator=None):
+    def ols_cov(self, X, residuals, clusters=None, covariance_estimator=None):
         """ Calculate covariance matrix and standard errors
 
         Input
         covariance_estimator: String or None, see __init()__; if None, uses the
                               value provided in __init()__
         """
+        # Calculate (X'X)^(-1)
+        XXinv = scl.pinv(X.T @ X)
+
+        U_hat = residuals
+
+        clustvar = clusters
+
         # Check whether covariance_estimator was changed from the default None
         if covariance_estimator is not None:
             # If so, set cov_est to the specified covariance estimator
@@ -376,13 +357,13 @@ class ols():
 
         # Otherwise, check whether the original value provided to __init__() was
         # left at the default None, and no cluster IDs were provided
-        elif (self.cov_est is None) and (self.clustvar is None):
+        elif (self.cov_est is None) and (clustvar is None):
             # If so, use HC1 as the default covariance estimator
             cov_est = 'hc1'
 
         # Otherwise, check whether the original value provided to __init__() was
         # left at the default None, and cluster IDs were provided
-        elif (self.cov_est is None) and (self.clustvar is not None):
+        elif (self.cov_est is None) and (clustvar is not None):
             # If so, use clustered standard errors
             cov_est = 'cluster'
 
@@ -393,7 +374,7 @@ class ols():
         # Check whether clusters were provided, but a non-clustered covariance
         # estimator is being used, and the class is set to be talkative
         if (
-                (self.clustvar is not None)
+                (clustvar is not None)
                 and (cov_est != 'cluster')
                 and self.verbose
         ):
@@ -408,7 +389,7 @@ class ols():
             # variance
             self.V_hat = (
                 (1 / (self.n - self.k))
-                * self.XXinv * (self.U_hat.T @ self.U_hat)
+                * XXinv * (U_hat.T @ U_hat)
             )
 
         # HC1
@@ -416,25 +397,25 @@ class ols():
             # Calculate component of middle part of EHW sandwich,
             # S_i = X_i u_i, which makes it very easy to calculate
             # sum_i X_i X_i' u_i^2 = S'S
-            S = (self.U_hat @ np.ones(shape=(1,self.k))) * self.X
+            S = (U_hat @ np.ones(shape=(1,self.k))) * X
 
             # Calculate EHW variance/covariance matrix
             self.V_hat = (
                 (self.n / (self.n - self.k))
-                * self.XXinv @ (S.T @ S) @ self.XXinv
+                * XXinv @ (S.T @ S) @ XXinv
             )
 
         # Clustered errors
         elif cov_est.lower() == 'cluster':
             # Calculate number of clusters
-            J = len(np.unique(self.clustvar[:,0]))
+            J = len(np.unique(clustvar[:,0]))
 
             # Same thing as S above, but needs to be a DataFrame, because pandas
             # has the groupby method, which is needed in the next step
-            S = pd.DataFrame((self.U_hat @ np.ones(shape=(1,self.k))) * self.X)
+            S = pd.DataFrame((U_hat @ np.ones(shape=(1,self.k))) * X)
 
             # Sum all covariates within clusters
-            S = S.groupby(self.clustvar[:,0], axis=0).sum()
+            S = S.groupby(clustvar[:,0], axis=0).sum()
 
             # Convert back to a NumPy array
             S = np.array(S).astype(self.fprec)
@@ -442,7 +423,7 @@ class ols():
             # Calculate cluster-robust variance estimator
             self.V_hat = (
                 (self.n / (self.n - self.k) ) * (J / (J - 1))
-                * self.XXinv @ (S.T @ S) @ self.XXinv
+                * XXinv @ (S.T @ S) @ XXinv
             )
 
         # Some other unknown method
@@ -460,6 +441,13 @@ class ols():
         # Calculate the standard errors for all coefficients
         self.se = cvec(np.sqrt(np.diag(self.V_hat))).astype(self.fprec)
 
+        sedf = pd.DataFrame(
+            self.se, index=self.names_X, columns=['Standard error']
+        )
+        Vdf = pd.DataFrame(self.V_hat, index=self.names_X, columns=self.names_X)
+
+        return sedf, Vdf
+
 
     # Define a function to calculate t-statistics
     def ols_t(self):
@@ -468,6 +456,8 @@ class ols():
         # to get that, I have to convert the square root of the diagonal
         # elements of V_hat into a proper column vector first)
         self.t = self.coef / self.se
+
+        return pd.DataFrame(self.t, index=self.names_X, columns=['t-statistic'])
 
 
     # Define a function to calculate confidence intervals
@@ -497,14 +487,18 @@ class ols():
         )
 
         # Make a two element list of names for the upper and lower bound
-        self.names_ci = ['{}%'.format(q*100) for q in quants]
+        names_ci = ['{}%'.format(q*100) for q in quants]
+
+        return pd.DataFrame(self.ci, index=self.names_X, columns=names_ci)
 
 
     # Define a function to calculate p-values
     def ols_p(self):
         """ Calculate p-values """
         # Calculate p-values
-        self.p = 2 * (1 - scs.norm.cdf(np.abs(self.t)))
+        self.p = 2 * (1 - scs.t(df=self.n-self.k).cdf(np.abs(self.t)))
+
+        return pd.DataFrame(self.p, index=self.names_X, columns=['p-value'])
 
 
     # Define a function to return a 'classic' regression table
@@ -533,7 +527,7 @@ class ols():
 
 
     # Define a function which calculates fitted values
-    def predict(self, X=None, add_intercept=None):
+    def predict(self, X, add_intercept=None):
         """ Calculate fitted values """
 
         if add_intercept is not None:
@@ -541,70 +535,52 @@ class ols():
         else:
             add_icept = self.add_icept
 
-        # Check whether X data were provided
-        if X is not None:
-            # If so, use those
-            if np.ndim(X) == 1:
-                predict_X = cvec(X)
-            else:
-                predict_X = np.array(X)
-
-            # Check whether an intercept needs to be added
-            if add_icept:
-                # If so, set up an intercept
-                cons = np.ones(shape=(predict_X.shape[0], 1))
-
-                # Add it to the data matrix
-                predict_X = np.concatenate([cons, predict_X], axis=1)
-
-            predict_X = predict_X.astype(self.fprec)
+        if np.ndim(X) == 1:
+            X = cvec(X)
         else:
-            # Otherwise, use the existing data
-            predict_X = self.X
+            X = np.array(X)
+
+        # Check whether an intercept needs to be added
+        if add_icept:
+            # If so, set up an intercept
+            cons = np.ones(shape=(X.shape[0], 1))
+
+            # Add it to the data matrix
+            X = np.concatenate([cons, X], axis=1)
+
+        X = X.astype(self.fprec)
 
         # Get fitted values
-        self.y_hat = predict_X @ self.coef
+        y_hat = X @ self.coef
 
         # Return them
-        return self.y_hat
+        return y_hat
 
 
     # Define a function to calculate the R-squared
-    def score(self, X=None, y=None):
+    def score(self, X, y):
         """ Calculate R-squared """
 
-        # Check whether X data were provided
-        if X is not None:
-            # If so, use those
-            if np.ndim(X) == 1:
-                score_X = cvec(X)
-            else:
-                score_X = np.array(X)
-
-            # Check whether an intercept needs to be added
-            if self.add_icept:
-                # If so, set up an intercept
-                cons = np.ones(shape=(score_X.shape[0], 1))
-
-                # Add it to the data matrix
-                score_X = np.concatenate([cons, score_X], axis=1)
-
-            # Make sure the data have the right precision
-            score_X = score_X.astype(self.fprec)
+        if np.ndim(X) == 1:
+            X = cvec(X)
         else:
-            # Otherwise, use the existing data
-            score_X = self.X
+            X = np.array(X)
 
-        # Check whether y data were provided
-        if y is not None:
-            # If so, use those
-            score_y = cvec(y).astype(self.fprec)
-        else:
-            # Otherwise, use the existing data
-            score_y = self.y
+        # Check whether an intercept needs to be added
+        if self.add_icept:
+            # If so, set up an intercept
+            cons = np.ones(shape=(X.shape[0], 1))
 
-        # Get fitted values at score_X
-        y_hat = self.predict(score_X, add_intercept=False)
+            # Add it to the data matrix
+            X = np.concatenate([cons, X], axis=1)
+
+        # Make sure the data have the right precision
+        X = X.astype(self.fprec)
+
+        score_y = cvec(y).astype(self.fprec)
+
+        # Get fitted values at X
+        y_hat = self.predict(X, add_intercept=False)
 
         # Calculate residual sum of squares
         SSR = ((score_y - y_hat) ** 2).sum()
@@ -754,7 +730,7 @@ class ols():
 
 
     # Define a function which generates a new draw of data (for bootstrapping)
-    def simulate(self, residuals, X=None, coef=None):
+    def simulate(self, X, residuals, coef=None):
         """ Simulate data for bootstrap draws """
 
         # Check whether coef was left at the default None
@@ -766,36 +742,30 @@ class ols():
             # vector based on coef
             sim_coef = cvec(coef).astype(self.fprec)
 
-        # Check whether X was left at the default None
-        if X is None:
-            # If so, set the simulation X to the existing data
-            sim_X = self.X
+        if np.ndim(X) == 1:
+            X = cvec(X)
         else:
-            # Otherwise, use the provided data
-            if np.ndim(X) == 1:
-                sim_X = cvec(X)
-            else:
-                sim_X = np.array(X)
+            X = np.array(X)
 
-            # Check whether an intercept needs to be added
-            if self.add_icept:
-                # If so, set up an intercept
-                cons = np.ones(shape=(sim_X.shape[0], 1))
+        # Check whether an intercept needs to be added
+        if self.add_icept:
+            # If so, set up an intercept
+            cons = np.ones(shape=(X.shape[0], 1))
 
-                # Add it to the data matrix
-                sim_X = np.concatenate([cons, sim_X], axis=1)
+            # Add it to the data matrix
+            X = np.concatenate([cons, X], axis=1)
 
-            # Make sure the data have the right precision
-            sim_X = sim_X.astype(self.fprec)
+        # Make sure the data have the right precision
+        X = X.astype(self.fprec)
 
         # Adjust the simulation residuals
         sim_residuals = cvec(residuals).astype(self.fprec)
 
         # Generate simulated data
-        self.sim_y = sim_X @ sim_coef + sim_residuals
+        y = X @ sim_coef + sim_residuals
 
         # Return the result
-        return self.sim_y
+        return y
 
 
     # Define a dummy method set_params(), so this can be used with that has such
