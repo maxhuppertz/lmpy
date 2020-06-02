@@ -7,7 +7,7 @@ import copy as cp
 import joblib as jbl
 import numpy as np
 import pandas as pd
-import scipy.stats
+import scipy.stats as scs
 import sklearn.preprocessing as skp
 from hdmpy import cvec
 from lmpy.ols import ols
@@ -17,7 +17,23 @@ from multiprocessing import cpu_count
 ### 2: Auxiliary functions
 ################################################################################
 
-# Currently, there are none
+
+def _get_p_i(bsamp, orig_estimate, one_sided=False, imp_null=False):
+    if orig_estimate < 0:
+        if imp_null:
+            p = scs.percentileofscore(bsamp, orig_estimate)/100
+        else:
+            p = 1 - scs.percentileofscore(bsamp, 0)/100
+    else:
+        if imp_null:
+            p = 1 - scs.percentileofscore(bsamp, orig_estimate)/100
+        else:
+            p = scs.percentileofscore(bsamp, 0)/100
+
+    if not one_sided:
+        p = 2 * p
+
+    return p
 
 ################################################################################
 ### 3: Bootstrap algorithms
@@ -62,10 +78,10 @@ def _b_iter_pairs(model, X, Y, bootstrap_stat='coefficients', seed=0,
     # Check whether to fix the seed
     if fix_seed:
         # If so, draw with fixed seed
-        idx = scipy.stats.randint(low=0, high=n).rvs(size=n, random_state=seed)
+        idx = scs.randint(low=0, high=n).rvs(size=n, random_state=seed)
     else:
         # Otherwise, draw wfully randomly
-        idx = scipy.stats.randint(low=0, high=n).rvs(size=n)
+        idx = scs.randint(low=0, high=n).rvs(size=n)
 
     # Draw samples of observations according to idx
     Xstar = X[idx,:]
@@ -128,10 +144,10 @@ def _b_iter_wild(model_res, model, X, U_hat_res, impose_null,
     # Check whether to fix the seed
     if fix_seed:
         # If so, draw with a fixed seed
-        E = scipy.stats.bernoulli(p=.5).rvs(size=n, random_state=seed)
+        E = scs.bernoulli(p=.5).rvs(size=n, random_state=seed)
     else:
         # Otherwise, draw fully randomly
-        E = scipy.stats.bernoulli(p=.5).rvs(size=n)
+        E = scs.bernoulli(p=.5).rvs(size=n)
 
     # Replace any zeros as -1
     E[E==0] = -1
@@ -206,10 +222,10 @@ def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters,
     # Check whether to fix the seed
     if fix_seed:
         # If so, draw with a fixed seed
-        E = scipy.stats.bernoulli(p=.5).rvs(size=J, random_state=seed)
+        E = scs.bernoulli(p=.5).rvs(size=J, random_state=seed)
     else:
         # Otherwise, draw fully randomly
-        E = scipy.stats.bernoulli(p=.5).rvs(size=J)
+        E = scs.bernoulli(p=.5).rvs(size=J)
 
     # Replace any zeros as -1
     E[E==0] = -1
@@ -236,7 +252,7 @@ def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters,
     return res
 
 ################################################################################
-### 4.2: Class to implement bootstrapping algorithms
+### 3.2: Class to implement bootstrapping algorithms
 ################################################################################
 
 
@@ -363,30 +379,15 @@ class boot():
         # Instantiate parameters for self.summarize() results
         self.nround = nround
 
-        # Instantiate data matrices
-        #self.X = None
-        #self.y = None
-
-        # Instantiate variables created by other functions
-        #
-        # Variables created by self.bootstrap_distribution()
-        #self.bsamps = None
-
-        # Variables created by self.get_ci()
-        self.ci = None
-        self.names_ci = None
-
         # Variables created by self.summarize()
         self.regtable = None
 
         # Variables created by self.boot_cov()
         #self.V_hat_boot = None
 
-        U_hat_res = residuals
-
-        if U_hat_res is None and self.algorithm.lower() in ['wild', 'cgm']:
+        if residuals is None and self.algorithm.lower() in ['wild', 'cgm']:
             if y is not None:
-                U_hat_res = y - self.model.predict(X)
+                residuals = y - self.model.predict(X)
             else:
                 raise ValueError('Error in boot(): The chosen bootstrap '
                                  + 'algorithm ({}) '.format(self.algorithm)
@@ -398,17 +399,21 @@ class boot():
         # Run functions to get bootstrapped confidence interval
         # Get bootstrap distribution
         bsamps = self.bootstrap_distribution(
-            X=X, y=y, U_hat_res=U_hat_res, clusters=clusters, **kwargs_fit
+            X=X, y=y, U_hat_res=residuals, clusters=clusters, **kwargs_fit
         )
 
         # Get confidence intervals
-        self.get_ci(bsamps)
+
+        cidf = self.get_ci(bsamps)
+
+        # Get p values
+        pdf = self.get_p(bsamps)
 
         # Combine results into a dictionary
         self.est = {
             'original estimates': self.model.est[self.stat],
-            'ci': pd.DataFrame(self.ci, index=self.model.est[self.stat].index,
-                               columns=self.names_ci),
+            'ci': cidf,
+            'p': pdf,
             'statistic': self.stat,
             'B': self.B,
             'algorithm': self.algorithm
@@ -455,6 +460,7 @@ class boot():
             if (
                     (self.impose_null_idx.shape[0] == X.shape[1] - 1)
                     and self.model.add_icept
+                    and (self.stat != 'wald')
             ):
                 # If so, add a False at the beginning, assuming that this
                 # happened because the intercept was left out of the model
@@ -544,51 +550,65 @@ class boot():
 
 
     # Define a function to calculate bootstrapped confidence intervals
-    def get_ci(self, bsamps=True, one_sided=None):
+    def get_ci(self, bsamps):
         """ Get bootstrapped confidence interval """
-        # Set one sided parameter
-        #
-        # If one was provided ...
-        if one_sided is not None:
-            # ... continue as is
-            pass
-
-        # Otherwise, if one was set in __init__() ...
-        elif self.one_sided is not None:
-            # ... use that
-            one_sided = self.one_sided
-
-        # Otherwise, if this is bootstrapping a Wald statistic ...
-        elif self.stat in ['wald']:
-            # ... use an upper one sided test
-            one_sided = 'upper'
-
-        # Otherwise ...
-        else:
-            # ... use a two sided test
-            one_sided = False
-
         # Get quantiles to compute
-        if one_sided == 'upper':
+        if self.one_sided == 'upper':
             quants = [0, 1 - self.level]
-        elif one_sided == 'lower':
+        elif self.one_sided == 'lower':
             quants = [self.level, 1]
         else:
             quants = [self.level/2, 1 - self.level/2]
 
         # Get the confidence intervals
-        self.ci = np.quantile(bsamps, quants, axis=1).T.astype(self.fprec)
+        ci = np.quantile(bsamps, quants, axis=1).T.astype(self.fprec)
 
         # Replace upper or lower bounds if applicable
-        if (one_sided == 'upper') and self.stat in ['wald']:
-            self.ci[:,0] = 0
-        elif one_sided == 'upper':
-            self.ci[:,0] = -np.inf
-        elif one_sided == 'lower':
-            self.ci[:,1] = np.inf
+        if (self.one_sided == 'upper') and self.stat in ['wald']:
+            ci[:,0] = 0
+        elif self.one_sided == 'upper':
+            ci[:,0] = -np.inf
+        elif self.one_sided == 'lower':
+            ci[:,1] = np.inf
 
         # Make a two element list of names for the upper and lower bound
-        self.names_ci = ['{}%'.format(q*100) for q in quants]
+        names_ci = ['{}%'.format(q*100) for q in quants]
+
+        ci = pd.DataFrame(
+            ci, index=self.model.est[self.stat].index, columns=names_ci
+        )
+
+        return ci
+
+
+    # Define a function to calculate bootstrapped p-values
+    def get_p(self, bsamps):
+        """ Get bootstrapped p-values """
+        orig = self.model.est[self.stat]
+
+        p = pd.DataFrame(index=orig.index, columns=['p-value'])
+
+        if self.impose_null_idx is None:
+            imp0 = np.zeros(shape=p.shape).astype(bool)
+        else:
+            imp0 = self.impose_null_idx
+
+            if imp0.shape[0] == p.shape[0] - 1:
+                imp0 = (
+                    np.concatenate([cvec(False), self.impose_null_idx], axis=0)
+                )
+
+        for i in np.arange(p.shape[0]):
+            p.iloc[i, 0] = (
+                _get_p_i(
+                    bsamp=bsamps[i,:],
+                    orig_estimate=self.model.est[self.stat].iloc[i,:].values,
+                    one_sided=self.one_sided,
+                    imp_null=imp0[i,0]
+                )
+            )
+
+        return p
 
 
     # Define a function to summarize the results
@@ -598,19 +618,24 @@ class boot():
         self.regtable = (
             pd.concat(
                 [self.est['original estimates'],
-                 self.est['ci']
+                 self.est['ci'],
+                 self.est['p']
                 ], axis=1
             )
         )
 
         # Add null imposed information if applicable
         if (
-                (self.impose_null_idx is not None)
-                and (self.impose_null_idx.shape[0] == self.regtable.shape[0])
+                self.impose_null_idx is not None
         ):
             self.regtable = (
                 pd.concat([self.regtable, self.est['null imposed']], axis=1)
             )
+
+            # The first row will be missing if there was an intercept in X, and
+            # it looks nicer if the resulting NAN is replaced with False
+            if self.impose_null_idx.shape[0] != self.regtable.shape[0]:
+                self.regtable.iloc[0,-1] = False
 
         # Round the results
         self.regtable = self.regtable.round(self.nround)
