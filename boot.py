@@ -18,14 +18,35 @@ from multiprocessing import cpu_count
 ################################################################################
 
 
+# Define a function to calculate boostrap p value for a single statistic
 def _get_p_i(bsamp, orig_estimate, one_sided=False, imp_null=False):
+    """ Calculate bootstrap p-value for a single statistic
+
+    Inputs
+    bsamp: vector-like; bootstrapped statistics
+    orig_estimate: float; statistic for the original sample
+    one_sided: 'upper', 'lower', or False; if 'upper', the test is against the
+               one sided alternative that the statistic is positive, if 'lower',
+               the test is against the one sided alternative that it is
+               negative, if False, the test is two sided
+    imp_null: boolean; if True, a null was imposed while calculating the
+              bootstrapped statistics. Currently, only the null that the
+              underlying population value is zero is supported.
+
+    Output
+    p: float; bootstrap p-value
+    """
     if orig_estimate < 0:
-        if imp_null:
+        if one_sided == 'upper':
+            p = 1
+        elif imp_null:
             p = scs.percentileofscore(bsamp, orig_estimate)/100
         else:
             p = 1 - scs.percentileofscore(bsamp, 0)/100
     else:
-        if imp_null:
+        if one_sided == 'lower':
+            p = 1
+        elif imp_null:
             p = 1 - scs.percentileofscore(bsamp, orig_estimate)/100
         else:
             p = scs.percentileofscore(bsamp, 0)/100
@@ -374,7 +395,11 @@ class boot():
             self.level = level
         else:
             self.level = self.model.level
-        self.one_sided = one_sided
+
+        if one_sided is not None:
+            self.one_sided = one_sided
+        else:
+            self.one_sided = False
 
         # Instantiate parameters for self.summarize() results
         self.nround = nround
