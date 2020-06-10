@@ -40,16 +40,16 @@ def _get_p_i(bsamp, orig_estimate, one_sided=False, imp_null=False):
         if one_sided == 'upper':
             p = 1
         elif imp_null:
-            p = scs.percentileofscore(bsamp, orig_estimate)/100
+            p = scs.percentileofscore(bsamp, orig_estimate, kind='weak')/100
         else:
-            p = 1 - scs.percentileofscore(bsamp, 0)/100
+            p = 1 - scs.percentileofscore(bsamp, 0, kind='strict')/100
     else:
         if one_sided == 'lower':
             p = 1
         elif imp_null:
-            p = 1 - scs.percentileofscore(bsamp, orig_estimate)/100
+            p = 1 - scs.percentileofscore(bsamp, orig_estimate, kind='weak')/100
         else:
-            p = scs.percentileofscore(bsamp, 0)/100
+            p = scs.percentileofscore(bsamp, 0, kind='strict')/100
 
     if not one_sided:
         p = 2 * p
@@ -71,11 +71,14 @@ def _b_iter_pairs(model, X, Y, bootstrap_stat='coefficients', seed=0,
     """ Run one iteration of the pairs bootstrap
 
     Inputs
-    model: Model object, must have a fit() method and return a dictionary of
+    model: Model object; must have a fit() method and return a dictionary of
            results model.est. Underlying model used for the boostrap estimation.
-    bootstrap_stat: Statistic to bootstrap, must be a key in model.est
-    seed: Scalar, seed to use if fix_seed is True
-    fix_seed: Boolean, if True, fixes the seed at the provided value
+    X: n by k matrix-like; RHS variables
+    y: n by 1 vector-like; outcome variable
+    bootstrap_stat: Statistic to bootstrap; must be a key in model.est
+    seed: Scalar; seed to use if fix_seed is True
+    fix_seed: Boolean; if True, fixes the seed at the provided value
+    copy_data: Boolean; if True, copies input data
 
     Output
     res: k by 1 vector, estimated statistics for the bootstrap sample
@@ -131,6 +134,8 @@ def _b_iter_wild(model_res, model, X, U_hat_res, impose_null,
     model: Model object, must have a fit() method and return a dictionary of
            results model.est. Underlying unrestricted model used for the
            bootstrap estimation.
+    X: n by k matrix-like; RHS variables
+    U_hat_res: n by 1 vector-like;
     bootstrap_stat: Statistic to bootstrap, must be a key in model.est
     eta: Scalar, absolute value of the two possible values of the two point
          distribution used to generate bootstrapped residuals
@@ -295,9 +300,10 @@ class boot():
                objects. All models in lmpy follow the conventions needed to be
                used as an input for boot(). Underlying model used to estimate
                statistics of interest on bootstrap samples.
-        y: n by 1 vector-like or None, outcome variable. If model has not been
-           fit, boot() can fit the model itself, given y and X were provided.
-        X: n by k matrix-like or None, RHS variables
+        X: n by k matrix-like; RHS variables
+        y: n by 1 vector-like or None; outcome variable. If model has not been
+           fit, boot() can fit the model itself, given y was provided. Needed
+           for the pairs bootstrap.
         algorithm: String, bootstrap algorithm to use. Possible choices are:
 
                    'pairs': Pairs bootstrap
@@ -585,8 +591,21 @@ class boot():
         else:
             quants = [self.level/2, 1 - self.level/2]
 
-        # Get the confidence intervals
-        ci = np.quantile(bsamps, quants, axis=1).T.astype(self.fprec)
+        # Get the confidence intervals. Doing these individually allows me to
+        # ensure that intervals are conservative, in the sense that if a
+        # quantile lies between two bootstrap observations, the test picks the
+        # one which will make the confidence interval largest.
+        ci = np.zeros(shape=(bsamps.shape[0], 2))
+        ci[:,0] = (
+            np.quantile(
+                bsamps, quants[0], axis=1, interpolation='lower'
+            ).T.astype(self.fprec)
+        )
+        ci[:,1] = (
+            np.quantile(
+                bsamps, quants[1], axis=1, interpolation='higher'
+            ).T.astype(self.fprec)
+        )
 
         # Replace upper or lower bounds if applicable
         if (self.one_sided == 'upper') and self.stat in ['wald']:
