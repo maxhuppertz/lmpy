@@ -35,25 +35,60 @@ def _get_p_i(bsamp, orig_estimate, one_sided=False, imp_null=False):
 
     Output
     p: float; bootstrap p-value
+
+    Note
+    Currently, the only supported null hypothesis is that
+
+    orig_parameter == 0
+
+    where orig_parameter is the parameter orig_estimate is an estimate of
     """
+
+    # Check whether the original estimate was below zero
     if orig_estimate < 0:
         if one_sided == 'upper':
+            # If so, never reject for an upper tailed alternative. (The
+            # strongest permissible test under that alternative uses 0 as its
+            # critical value, but given the original estimate is negative, even
+            # that test fails to reject the null. So there is no strongest
+            # permissible test which just rejects the null.)
             p = 1
         elif imp_null:
+            # If the null was imposed, record the percentile ranking of the
+            # original estimate in the bootstrap samples. (The area under the
+            # bootstrap CDF below the original estimate.) A test which uses a
+            # critical value just at the original estimate will just reject the
+            # null. The 'weak' option makes this conservative - it counts values
+            # weakly smaller than the original estimate.
             p = scs.percentileofscore(bsamp, orig_estimate, kind='weak')/100
         else:
+            # If no null was imposed, record one minus the percentile ranking of
+            # zero. (The are under the bootstrap CDF above zero.) A test which
+            # uses a critical value just at zero will just reject the null. The
+            # 'strict' option makes this conservative - it counts only values
+            # strictly below zero.
             p = 1 - scs.percentileofscore(bsamp, 0, kind='strict')/100
     else:
         if one_sided == 'lower':
+            # If the original estimate was positive, never reject for a lower
+            # tailed alternative
             p = 1
         elif imp_null:
+            # If the null was imposed, record one minus the percentile ranking
+            # of the original estimate
             p = 1 - scs.percentileofscore(bsamp, orig_estimate, kind='weak')/100
         else:
+            # If no null was imposed, record the percentile ranking of zero
             p = scs.percentileofscore(bsamp, 0, kind='strict')/100
 
+    # If the test is two sided, double the p-value. (The two cases above ensure
+    # that the test under consideration uses a critical value which allows it to
+    # just reject the null. This just puts an equal amount of mass outside of
+    # -orig_estimate, which will not affect rejection of the null.
     if not one_sided:
         p = 2 * p
 
+    # Return the p-value
     return p
 
 ################################################################################
@@ -83,6 +118,7 @@ def _b_iter_pairs(model, X, Y, bootstrap_stat='coefficients', seed=0,
     Output
     res: k by 1 vector, estimated statistics for the bootstrap sample
     """
+
     # Make sure the underlying model object remains unchanged (that can be a
     # problem when not running this in parallel, for example)
     model = cp.copy(model)
@@ -145,20 +181,24 @@ def _b_iter_wild(model_res, model, X, U_hat_res, impose_null,
     Output
     res: k by 1 vector, estimated statistics for the bootstrap sample
     """
+
     # Make sure the underlying model objects remain unchanged (that can be a
     # problem when not running this in parallel, for example)
     model_res = cp.copy(model_res)
     model = cp.copy(model)
 
+    # Get X from the unrestricted model
     if copy_data:
         X = cp.copy(X)
         U_hat_res = cp.copy(U_hat_res)
 
+    # Set up X for the restricted model, ensuring that it is two dimensional
     if X.shape[1] == 1:
         X_res = cvec(X)
     else:
         X_res = np.array(X)
 
+    # Subset to X variables which no null was imposed on
     X_res = X_res[:, ~impose_null]
 
     # Get the number of observations n
@@ -219,6 +259,7 @@ def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters,
     Output
     res: k by 1 vector, estimated statistics for the bootstrap sample
     """
+
     # Make sure the underlying model objects remain unchanged (that can be a
     # problem when not running this in parallel, for example)
     model_res = cp.copy(model_res)
@@ -229,11 +270,13 @@ def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters,
         X = cp.copy(X)
         U_hat_res = cp.copy(U_hat_res)
 
+    # Set up X for the restricted model, ensuring that it is two dimensional
     if X.shape[1] == 1:
         X_res = cvec(X)
     else:
         X_res = np.array(X)
 
+    # Subset to X variables which no null was imposed on
     X_res = X_res[:, ~impose_null]
 
     # Get cluster variable (doesn't matter from which model)
@@ -416,6 +459,7 @@ class boot():
         # Variables created by self.boot_cov()
         #self.V_hat_boot = None
 
+        # Check whether residuals
         if residuals is None and self.algorithm.lower() in ['wild', 'cgm']:
             if y is not None:
                 residuals = y - self.model.predict(X)
@@ -434,7 +478,6 @@ class boot():
         )
 
         # Get confidence intervals
-
         cidf = self.get_ci(bsamps)
 
         # Get p values
@@ -464,13 +507,17 @@ class boot():
                                  columns=['Null imposed'])
                 )
 
+        # Check whether the bootstrapped covariance matrix has to be calculated
         if self.get_boot_cov:
+            # If so, get the covariance matrix
             V_hat_boot = self.boot_cov(bsamps)
 
+            # Record the matrix
             self.est['bootstrap covariance matrix'] = (
                 V_hat_boot
             )
 
+            # Record a Wald test based on the matrix
             self.est['wald test'] = (
                 self.wald(V_hat_boot)
             )
@@ -480,6 +527,7 @@ class boot():
     def bootstrap_distribution(self, X, y, U_hat_res=None, clusters=None,
                                **kwargs_fit):
         """ Get bootstrap distribution  """
+
         # Check whether a vector indicating parameters which need to have a
         # null enforced was provided
         if self.impose_null_idx is not None:
@@ -583,6 +631,7 @@ class boot():
     # Define a function to calculate bootstrapped confidence intervals
     def get_ci(self, bsamps):
         """ Get bootstrapped confidence interval """
+
         # Get quantiles to compute
         if self.one_sided == 'upper':
             quants = [0, 1 - self.level]
@@ -628,20 +677,31 @@ class boot():
     # Define a function to calculate bootstrapped p-values
     def get_p(self, bsamps):
         """ Get bootstrapped p-values """
+
+        # Get the original estimate
         orig = self.model.est[self.stat]
 
+        # Set up an empty DataFrame for the bootstrapped p-values
         p = pd.DataFrame(index=orig.index, columns=['p-value'])
 
+        # Check whether no null needs to be imposed
         if self.impose_null_idx is None:
+            # If so, set up a vector of False, indicating that no nulls should
+            # ever be imposed
             imp0 = np.zeros(shape=p.shape).astype(bool)
         else:
+            # Otherwise, get the imposed nulls
             imp0 = self.impose_null_idx
 
+            # If one element is missing from imp0, add a first element
+            # indicating that the intercept is unrestricted
             if imp0.shape[0] == p.shape[0] - 1:
                 imp0 = (
                     np.concatenate([cvec(False), self.impose_null_idx], axis=0)
                 )
 
+        # Get bootstrapped p-values (this could be parallelized, altough it is
+        # generally fast relative to getting the bootstrap samples)
         for i in np.arange(p.shape[0]):
             p.iloc[i, 0] = (
                 _get_p_i(
@@ -652,12 +712,14 @@ class boot():
                 )
             )
 
+        # Return vector of bootstrapped p-values
         return p
 
 
     # Define a function to summarize the results
     def summarize(self):
         """ Produce a pandas DataFrame summarizing the results """
+
         # Make a regression table DataFrame
         self.regtable = (
             pd.concat(
@@ -695,6 +757,7 @@ class boot():
     # samples
     def boot_cov(self, bsamps):
         """ Calculate covariance matrix of bootstrapped statistics """
+
         # Calculate covariance
         return np.cov(bsamps, rowvar=True)
 
@@ -716,7 +779,9 @@ class boot():
         Outputs
         self.model.waldtable: See self.model.wald's documentation
         """
-        # Check whether self.boot_cov() has been run
+
+        # Check whether self.boot_cov() has been runa bootstrapped covariance
+        # matrix was provided
         if V_hat_boot is not None:
             # If so, get a Wald statistic using the bootstrapped covariance
             # matrix
@@ -724,9 +789,9 @@ class boot():
         else:
             # Otherwise, potentially display a warning
             if self.verbose:
-                print('\nNote in boot.wald(): Please use boot.get_cov() before',
-                      'running boot.wald(). Returning Wald statistic based on',
-                      'model covariance instead.')
+                print('\nNote in boot.wald(): Please provide a covariance',
+                      'matrix when running boot.wald(). Returning Wald',
+                      'statistic based on model covariance instead.')
 
             # Just get the Wald statistic from the underlying model
             self.model.wald(jointsig=jointsig, R=R, b=b)

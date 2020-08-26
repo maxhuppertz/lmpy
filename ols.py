@@ -72,6 +72,7 @@ class ols():
         nround: Integer, results of ols.summarize() will be rounded to this
                 number of decimal points
         """
+
         # Instantiate parameters
         #
         # Instantiate verbose flag
@@ -154,6 +155,7 @@ class ols():
         no_joint: Boolean or None, see __init()__; if None, use the value
                   provided in __init()__
         """
+
         # Check whether the generic name for X variables was changed
         if name_gen_X is not None:
             # If so, adjust self.name_gen_X
@@ -343,6 +345,7 @@ class ols():
         covariance_estimator: String or None, see __init()__; if None, uses the
                               value provided in __init()__
         """
+
         # Calculate (X'X)^(-1)
         XXinv = scl.pinv(X.T @ X)
 
@@ -468,6 +471,7 @@ class ols():
         level: Scalar in [0,1] or None, see __init()__; if None, uses the value
                provided in __init()__
         """
+
         # Check whether level was changed from the default None
         if level is not None:
             # If so, adjust the level
@@ -495,6 +499,7 @@ class ols():
     # Define a function to calculate p-values
     def ols_p(self):
         """ Calculate p-values """
+
         # Calculate p-values
         self.p = 2 * (1 - scs.t(df=self.n-self.k).cdf(np.abs(self.t)))
 
@@ -504,6 +509,7 @@ class ols():
     # Define a function to return a 'classic' regression table
     def summarize(self):
         """ Produce a pandas DataFrame containing model results """
+
         # Make a regression table DataFrame
         self.regtable = (
             pd.concat(
@@ -530,11 +536,15 @@ class ols():
     def predict(self, X, add_intercept=None):
         """ Calculate fitted values """
 
+        # Check whether add_intercept was specified
         if add_intercept is not None:
+            # If so, record the value
             add_icept = add_intercept
         else:
+            # Otherwise, use the model's value
             add_icept = self.add_icept
 
+        # Make sure X is two dimensional
         if np.ndim(X) == 1:
             X = cvec(X)
         else:
@@ -548,6 +558,7 @@ class ols():
             # Add it to the data matrix
             X = np.concatenate([cons, X], axis=1)
 
+        # Cast X to the set precision
         X = X.astype(self.fprec)
 
         # Get fitted values
@@ -561,6 +572,7 @@ class ols():
     def score(self, X, y):
         """ Calculate R-squared """
 
+        # Make sure X is two dimensional
         if np.ndim(X) == 1:
             X = cvec(X)
         else:
@@ -629,6 +641,7 @@ class ols():
         self.waldtable: 2 by 1 DataFrame, containing Wald statistic and
                         associated p-value
         """
+
         # Instantiate LHS restrictions matrix
         #
         # Check whether a joint significance test was specified

@@ -23,6 +23,16 @@ from hdmpy import cvec
 
 # Define the Bonferroni correction
 def bonferroni(p, varnames=None, gen_name='X'):
+    """ Run Bonferroni correction
+
+    Inputs
+    p: k by 1 vector-like; p-values to adjust
+    varnames: k by 1 vector-like or None; variable names
+    gen_name: string; generic variable name prefix, used if varnames is None
+
+    Outputs
+    padjs: k by 1 vector; adjusted p-values
+    """
     # Get the number of hypotheses M
     M = len(p)
 
@@ -58,6 +68,16 @@ def bonferroni(p, varnames=None, gen_name='X'):
 
 # Define the Holm-Bonferroni correction
 def holm_bonferroni(p, varnames=None, gen_name='X'):
+    """ Run Holm-Bonferroni correction
+
+    Inputs
+    p: k by 1 vector-like; p-values to adjust
+    varnames: k by 1 vector-like or None; variable names
+    gen_name: string; generic variable name prefix, used if varnames is None
+
+    Outputs
+    padjs: k by 1 vector; adjusted p-values
+    """
     # Get number of hypotheses M
     M = len(p)
 
