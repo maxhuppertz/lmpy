@@ -123,6 +123,7 @@ def _b_iter_pairs(model, X, Y, bootstrap_stat='coefficients', seed=0,
     # problem when not running this in parallel, for example)
     model = cp.copy(model)
 
+    # Copy data if necessary
     if copy_data:
         X = cp.copy(X)
         y = cp.copy(y)
@@ -370,7 +371,7 @@ class boot():
                    self.get_ci()
         B: Positive integer, number of bootstrap iterations to use
         par: Boolean, if True, runs bootstrap iterations in parallel
-        corecap: Integer of np.inf, maximum number of cores to use. Setting this
+        corecap: Integer or np.inf, maximum number of cores to use. Setting this
                  to np.inf uses all available cores.
         fix_seed: Boolean, if True, seeds are fixed throughout the bootstrapping
                   routine, to ensure replicability
@@ -667,10 +668,12 @@ class boot():
         # Make a two element list of names for the upper and lower bound
         names_ci = ['{}%'.format(q*100) for q in quants]
 
+        # Combine the confidence interval and names into a DataFrame
         ci = pd.DataFrame(
             ci, index=self.model.est[self.stat].index, columns=names_ci
         )
 
+        # Return the DataFrame
         return ci
 
 

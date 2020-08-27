@@ -259,19 +259,22 @@ class ols():
         # Instantiate y data elements
         fit_y = cvec(y).astype(self.fprec)
 
+        # Check whether clusters were not provided, but clustered errors are
+        # supposed to be used
+        if clusters is None and self.cov_est == 'cluster':
+            raise ValueError(
+                "Error in ols.fit(): The covariance estimator was set to"
+                + " 'cluster', but clusters were not provided; please provide"
+                + " cluster IDs, or change the covariance estimator"
+            )
+
         # Check whether a cluster variable was provided
-        if clusters is not None:
+        elif clusters is not None:
             # If so, adjust the cluster variable
             clustvar = cvec(clusters)
-        elif self.cov_est != 'cluster':
-            # Otherwise, adjust the clusters to again be None (in case the same
-            # model is fit and refit with and without providing clusters, for
-            # example)
-            clustvar = None
 
         # Calculate coefficient vector
         #self.coef = self.XXinv @ (X @ fit_y)
-
         self.coef = cvec(scl.lstsq(X, fit_y)[0]).astype(self.fprec)
 
         # Check whether to calculate anything besides the coefficients
@@ -349,8 +352,8 @@ class ols():
         # Calculate (X'X)^(-1)
         XXinv = scl.pinv(X.T @ X)
 
+        # Get residuals and clusters
         U_hat = residuals
-
         clustvar = clusters
 
         # Check whether covariance_estimator was changed from the default None
