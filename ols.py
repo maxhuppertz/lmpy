@@ -34,7 +34,7 @@ class ols():
     def __init__(self, name_gen_X='X', name_gen_y='y', add_intercept=True,
                  name_gen_icept='(Intercept)', coef_only=False,
                  no_joint=False, covariance_estimator=None, level=.05,
-                 verbose=True, fprec=np.float32, nround=4):
+                 verbose=True, fprec=np.float64, nround=4):
         """ Initialize ols() class
 
         Inputs
@@ -67,8 +67,9 @@ class ols():
         verbose: Boolean, if True, some notes and warnings are printed (e.g. if
                  X'X is not invertible, and a pseudo inverse needs to be used)
         fprec: Float data type, all floats will be cast to this type. The
-               default value is np.float32, which can speed up NumPy's matrix
-               multiplication in some settings.
+               default value is np.float64, to ensure high precision. Using
+               np.float32 instead can speed up NumPy's linear algebra in some
+               settings.
         nround: Integer, results of ols.summarize() will be rounded to this
                 number of decimal points
         """
@@ -458,11 +459,10 @@ class ols():
     # Define a function to calculate t-statistics
     def ols_t(self):
         """ Calculate t-statistics """
-        # Calculate t-statistics (I like having them as a column vector, but
-        # to get that, I have to convert the square root of the diagonal
-        # elements of V_hat into a proper column vector first)
+        # Calculate t-statistics
         self.t = self.coef / self.se
 
+        # Return the results
         return pd.DataFrame(self.t, index=self.names_X, columns=['t-statistic'])
 
 

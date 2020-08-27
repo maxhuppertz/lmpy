@@ -336,7 +336,7 @@ class boot():
                  one_sided=None, clusters=None, get_boot_cov=False,
                  residuals=None, B=4999,
                  par=True, corecap=np.inf, fix_seed=True, batch_size='auto',
-                 verbose=True, fprec=np.float32, nround=4, **kwargs_fit):
+                 verbose=True, fprec=np.float64, nround=4, **kwargs_fit):
         """ Initialize boot class
 
         Inputs
@@ -380,9 +380,10 @@ class boot():
                     uses the joblib default heuristic. If set to 'max', uses
                     batch_size = B / (cores used).
         verbose: Boolean, if True, boot() prints notes and warnings
-        fprec: Float data type, all data will be cast to this type. The default
-               is np.float32, which can speed up NumPy's linear algebra in
-               certain settings.
+        fprec: Float data type, all floats will be cast to this type. The
+               default value is np.float64, to ensure high precision. Using
+               np.float32 instead can speed up NumPy's linear algebra in some
+               settings.
         nround: Integer, results will be rounded to this number of decimals
         """
 
