@@ -281,7 +281,10 @@ def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters,
     X_res = X_res[:, ~impose_null]
 
     # Get cluster variable (doesn't matter from which model)
-    clustvar = cvec(labencode.fit_transform(clusters.flatten()))
+    if isinstance(clusters, pd.Series):
+        clustvar = cvec(labencode.fit_transform(clusters))
+    else:
+        clustvar = cvec(labencode.fit_transform(clusters.flatten()))
 
     # Get the number of clusters in the data
     J = len(np.unique(clustvar))
@@ -334,7 +337,7 @@ class boot():
     def __init__(self, X, y=None, model=ols, algorithm='pairs',
                  impose_null_idx=None, eta=1, bootstrap_stat='t', level=None,
                  one_sided=None, clusters=None, get_boot_cov=False,
-                 residuals=None, B=4999,
+                 residuals=None, B=4999, store_bsamps=False,
                  par=True, corecap=np.inf, fix_seed=True, batch_size='auto',
                  verbose=True, fprec=np.float64, nround=4, **kwargs_fit):
         """ Initialize boot class
@@ -416,6 +419,7 @@ class boot():
         self.impose_null_idx = impose_null_idx
         self.eta = eta
         self.get_boot_cov = get_boot_cov
+        self.store_bsamps = store_bsamps
 
         # Instantiate parameters related to parallel processing
         #
@@ -464,7 +468,7 @@ class boot():
         # Check whether residuals
         if residuals is None and self.algorithm.lower() in ['wild', 'cgm']:
             if y is not None:
-                residuals = y - self.model.predict(X)
+                residuals = cvec(y) - self.model.predict(X)
             else:
                 raise ValueError('Error in boot(): The chosen bootstrap '
                                  + 'algorithm ({}) '.format(self.algorithm)
@@ -524,6 +528,10 @@ class boot():
                 self.wald(V_hat_boot)
             )
 
+        # Store bootstrap samples if desired
+        if self.store_bsamps:
+            self.bsamps = bsamps
+
 
     # Define function to run different bootstrapping algorithms
     def bootstrap_distribution(self, X, y, U_hat_res=None, clusters=None,
@@ -559,10 +567,16 @@ class boot():
 
             # Fit the restricted model
             self.model_res.fit(X_res, y, coef_only=True, **kwargs_fit)
+
+            # Set up a null impose Series to pass on to bootstrap algorithms
+            impose_null_passon = self.impose_null_idx[:,0]
         else:
             # Otherwise, set self.model_res to self.model, so this can easily be
             # passed to algorithms which could have a null imposed
             self.model_res = cp.deepcopy(self.model)
+
+            # Set up a null impose Series to pass on to bootstrap algorithms
+            impose_null_passon = np.zeros(shape=X.shape[1]).astype(bool)
 
         # Check which algorithm to use
         #
@@ -594,7 +608,7 @@ class boot():
                 jbl.Parallel(n_jobs=self.n_cores, batch_size=self.batch_size)(
                     jbl.delayed(_b_iter_wild)(
                         model_res=self.model_res, X=X_res,
-                        impose_null=self.impose_null_idx[:,0],
+                        impose_null=impose_null_passon,
                         model=self.model, bootstrap_stat=self.stat,
                         eta=self.eta, seed=b, fix_seed=self.fix_seed,
                         **kwargs_fit)
@@ -610,7 +624,7 @@ class boot():
                     jbl.delayed(_b_iter_cgm)(
                         model_res=self.model_res, model=self.model, X=X,
                         U_hat_res=U_hat_res, clusters=clusters,
-                        impose_null=self.impose_null_idx[:,0],
+                        impose_null=impose_null_passon,
                         bootstrap_stat=self.stat, eta=self.eta, seed=b,
                         fix_seed=self.fix_seed, **kwargs_fit)
                     for b in np.arange(self.B)
@@ -627,7 +641,6 @@ class boot():
 
         # Concatenate bootstrap samples into a single k by B DataFrame
         return np.concatenate(bsamps, axis=1)
-
 
 
     # Define a function to calculate bootstrapped confidence intervals
@@ -686,7 +699,7 @@ class boot():
         orig = self.model.est[self.stat]
 
         # Set up an empty DataFrame for the bootstrapped p-values
-        p = pd.DataFrame(index=orig.index, columns=['p-value'])
+        p = pd.DataFrame(index=orig.index, columns=['p-value'], dtype=np.float)
 
         # Check whether no null needs to be imposed
         if self.impose_null_idx is None:
