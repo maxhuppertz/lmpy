@@ -123,6 +123,7 @@ class ols():
 
         # Variables created by self.score()
         self.R2 = None
+        self.R2adj = None
 
         # Variables created by self.wald()
         self.W = None
@@ -273,6 +274,10 @@ class ols():
         elif clusters is not None:
             # If so, adjust the cluster variable
             clustvar = cvec(clusters)
+
+        # Otherwise, just set clustvar to None
+        else:
+            clustvar = None
 
         # Calculate coefficient vector
         #self.coef = self.XXinv @ (X @ fit_y)
@@ -572,7 +577,7 @@ class ols():
 
 
     # Define a function to calculate the R-squared
-    def score(self, X, y):
+    def score(self, X, y, return_adjusted=False):
         """ Calculate R-squared """
 
         # Make sure X is two dimensional
@@ -606,8 +611,14 @@ class ols():
         # Calculate R-squared
         self.R2 = 1 - (SSR / SST)
 
-        # Return it
-        return self.R2
+        # Calculate adjusted R-squared
+        self.R2adj = 1 - ((self.n - 1) / (self.n - self.k - 1)) * (1 - self.R2)
+
+        # Return desired R-squared
+        if not return_adjusted:
+            return self.R2
+        else:
+            return self.R2adj
 
 
     # Define a function to calculate a Wald test (e.g. of joint significance)
