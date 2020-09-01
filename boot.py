@@ -226,7 +226,7 @@ def _b_iter_wild(model_res, model, X, U_hat_res, impose_null,
     U_hatstar = U_hat_res * E
 
     # Simulate outcomes
-    ystar = model_res.simulate(X=X, residuals=U_hatstar)
+    ystar = model_res.simulate(X=X_res, residuals=U_hatstar)
 
     # Fit the unrestricted model to the bootstrap sample
     model.fit(X=X, y=ystar, **kwargs_fit)
@@ -607,11 +607,11 @@ class boot():
             bsamps = (
                 jbl.Parallel(n_jobs=self.n_cores, batch_size=self.batch_size)(
                     jbl.delayed(_b_iter_wild)(
-                        model_res=self.model_res, X=X_res,
+                        model_res=self.model_res, model=self.model, X=X,
+                        U_hat_res=U_hat_res,
                         impose_null=impose_null_passon,
-                        model=self.model, bootstrap_stat=self.stat,
-                        eta=self.eta, seed=b, fix_seed=self.fix_seed,
-                        **kwargs_fit)
+                        bootstrap_stat=self.stat, eta=self.eta, seed=b,
+                        fix_seed=self.fix_seed, **kwargs_fit)
                     for b in np.arange(self.B)
                 )
             )
