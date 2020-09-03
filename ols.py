@@ -303,9 +303,11 @@ class ols():
 
             # Check whether frequency weights need to be used
             if not freq_weights:
-                # If not, normalize weights, and update number of observations
+                # If not, normalize weights
                 W = W * (self.n / W.sum())
             else:
+                # If these are frequency weights, update the number of
+                # observations
                 self.n = np.int(W.sum())
 
             # Get diagonal weights matrix
@@ -315,7 +317,6 @@ class ols():
             W = np.eye(self.n)
 
         # Calculate coefficient vector
-        #self.coef = cvec(scl.lstsq(X, y)[0]).astype(self.fprec)
         self.coef = (
             cvec(scl.lstsq(np.sqrt(W) @ X, np.sqrt(W) @ y)[0])
         ).astype(self.fprec)
@@ -395,7 +396,8 @@ class ols():
                               value provided in __init()__
         """
 
-        # Instantiate weights
+        # Instantiate weights (this function should never be called without W
+        # having been instantiated in self.__init__(), but just in case)
         if weights is None:
             W = np.eye(X.shape[0])
         else:
