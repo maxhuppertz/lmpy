@@ -33,8 +33,8 @@ class ols():
     # Define initialization function
     def __init__(self, name_gen_X='X', name_gen_y='y', add_intercept=True,
                  name_gen_icept='(Intercept)', coef_only=False,
-                 no_joint=False, covariance_estimator=None, level=.05,
-                 verbose=True, fprec=np.float64, nround=4):
+                 no_joint=False, covariance_estimator=None, freq_weights=False,
+                 level=.05, verbose=True, fprec=np.float64, nround=4):
         """ Initialize ols() class
 
         Inputs
@@ -87,6 +87,7 @@ class ols():
         self.name_gen_y = name_gen_y
         self.add_icept = add_intercept
         self.name_gen_icept = name_gen_icept
+        self.freq_weights = freq_weights
         self.coef_only = coef_only
         self.no_joint = no_joint
 
@@ -132,15 +133,17 @@ class ols():
 
 
     # Define a function to fit the model
-    def fit(self, X, y, clusters=None, names_X=None, name_y=None,
+    def fit(self, X, y, clusters=None, weights=None, names_X=None, name_y=None,
             name_gen_X=None, name_gen_y=None, add_intercept=None,
-            coef_only=None, no_joint=None, copy=True, **kwargs_wald):
+            coef_only=None, freq_weights=None, no_joint=None, copy=True,
+            **kwargs_wald):
         """ Fit OLS model
 
         Inputs
         y: n by 1 vector-like, outcome variable
         X: n by k matrix-like, RHS variables
         clusters: n by 1 vector-like or None, cluster IDs
+        weights: n by 1 vector-like or None, weights
         names_X: length n list or None, names for variables in X. If names_X is
                  None and X is a pandas DataFrame or Series, column names will
                  be used.
@@ -228,6 +231,7 @@ class ols():
             # ... use generic names
             self.name_y = self.name_gen_y
 
+        # Copy X if necessary
         if copy:
             X = X.copy()
 
@@ -259,7 +263,7 @@ class ols():
         self.n, self.k = X.shape
 
         # Instantiate y data elements
-        fit_y = cvec(y).astype(self.fprec)
+        y = cvec(y).astype(self.fprec)
 
         # Check whether clusters were not provided, but clustered errors are
         # supposed to be used
@@ -279,21 +283,56 @@ class ols():
         else:
             clustvar = None
 
+        # Check whether the frequency weights flag was changed from its standard
+        # None
+        if freq_weights is None:
+            # If not, use the provided value
+            freq_weights = self.freq_weights
+
+        # Instantiate weights matrix (this needs to be a diagonal matrix, and
+        # np.diag() only works as expected with a one dimensional input, so for
+        # once, I have to make sure this is one dimensional
+        if weights is not None:
+            # Start by instantiating the weights as is
+            if np.ndim(weights) == 1:
+                # For one dimensional weights, use them as is
+                W = np.array(weights)
+            else:
+                # Otherwise, make sure they're one dimensional
+                W = cvec(W)[:,0]
+
+            # Check whether frequency weights need to be used
+            if not freq_weights:
+                # If not, normalize weights, and update number of observations
+                W = W * (self.n / W.sum())
+            else:
+                self.n = np.int(W.sum())
+
+            # Get diagonal weights matrix
+            W = np.diag(weights).astype(self.fprec)
+        else:
+            # If weights were not specified, use identity matrix
+            W = np.eye(self.n)
+
         # Calculate coefficient vector
-        #self.coef = self.XXinv @ (X @ fit_y)
-        self.coef = cvec(scl.lstsq(X, fit_y)[0]).astype(self.fprec)
+        #self.coef = cvec(scl.lstsq(X, y)[0]).astype(self.fprec)
+        self.coef = (
+            cvec(scl.lstsq(np.sqrt(W) @ X, np.sqrt(W) @ y)[0])
+        ).astype(self.fprec)
 
         # Check whether to calculate anything besides the coefficients
         if not self.coef_only:
             # Calculate some inputs for covariance estimators
             #
             # Get residuals
-            U_hat = fit_y - X @ self.coef
+            U_hat = y - X @ self.coef
 
             # Get other elements of the OLS model
             #
             # Get the covariance
-            sedf, Vdf = self.ols_cov(X=X, residuals=U_hat, clusters=clustvar)
+            sedf, Vdf = self.ols_cov(
+                X=X, residuals=U_hat, clusters=clustvar, weights=W
+            )
 
             # Get t-statistics
             tdf = self.ols_t()
@@ -347,7 +386,8 @@ class ols():
 
 
     # Define a function to calculate the covariance matrix plus standard errors
-    def ols_cov(self, X, residuals, clusters=None, covariance_estimator=None):
+    def ols_cov(self, X, residuals, clusters=None, weights=None,
+                covariance_estimator=None):
         """ Calculate covariance matrix and standard errors
 
         Input
@@ -355,8 +395,14 @@ class ols():
                               value provided in __init()__
         """
 
+        # Instantiate weights
+        if weights is None:
+            W = np.eye(X.shape[0])
+        else:
+            W = weights
+
         # Calculate (X'X)^(-1)
-        XXinv = scl.pinv(X.T @ X)
+        XXinv = scl.pinv(X.T @ W @ X)
 
         # Get residuals and clusters
         U_hat = residuals
@@ -400,8 +446,7 @@ class ols():
             # For the homoskedastic estimator, just calculate the standard
             # variance
             self.V_hat = (
-                (1 / (self.n - self.k))
-                * XXinv * (U_hat.T @ U_hat)
+                (1 / (self.n - self.k)) * XXinv * (U_hat.T @ W @ U_hat)
             )
 
         # HC1
@@ -413,8 +458,7 @@ class ols():
 
             # Calculate EHW variance/covariance matrix
             self.V_hat = (
-                (self.n / (self.n - self.k))
-                * XXinv @ (S.T @ S) @ XXinv
+                (self.n / (self.n - self.k)) * XXinv @ (S.T @ W**2 @ S) @ XXinv
             )
 
         # Clustered errors
@@ -423,8 +467,14 @@ class ols():
             J = len(np.unique(clustvar[:,0]))
 
             # Same thing as S above, but needs to be a DataFrame, because pandas
-            # has the groupby method, which is needed in the next step
-            S = pd.DataFrame((U_hat @ np.ones(shape=(1,self.k))) * X)
+            # has the .groupby() method, which is needed to sum observations
+            # within cluster in the next step. Here, I need to incorporate the
+            # weights in S, instead of multiplying them in later.
+            S = pd.DataFrame(
+                (W @ np.ones(shape=(X.shape[0],self.k)))
+                * (U_hat @ np.ones(shape=(1,self.k)))
+                * X
+            )
 
             # Sum all covariates within clusters
             S = S.groupby(clustvar[:,0], axis=0).sum()
@@ -434,7 +484,7 @@ class ols():
 
             # Calculate cluster-robust variance estimator
             self.V_hat = (
-                (self.n / (self.n - self.k) ) * (J / (J - 1))
+                ( (self.n - 1) / (self.n - self.k)) * (J / (J - 1))
                 * XXinv @ (S.T @ S) @ XXinv
             )
 
@@ -453,11 +503,15 @@ class ols():
         # Calculate the standard errors for all coefficients
         self.se = cvec(np.sqrt(np.diag(self.V_hat))).astype(self.fprec)
 
+        # Convert them into a DataFrame
         sedf = pd.DataFrame(
             self.se, index=self.names_X, columns=['Standard error']
         )
+
+        # Get covariance matrix as DataFrame
         Vdf = pd.DataFrame(self.V_hat, index=self.names_X, columns=self.names_X)
 
+        # Return the results
         return sedf, Vdf
 
 
@@ -597,16 +651,16 @@ class ols():
         # Make sure the data have the right precision
         X = X.astype(self.fprec)
 
-        score_y = cvec(y).astype(self.fprec)
+        y = cvec(y).astype(self.fprec)
 
         # Get fitted values at X
         y_hat = self.predict(X, add_intercept=False)
 
         # Calculate residual sum of squares
-        SSR = ((score_y - y_hat) ** 2).sum()
+        SSR = ((y - y_hat) ** 2).sum()
 
         # Calculate total sum of squares
-        SST = ((score_y - score_y.mean()) ** 2).sum()
+        SST = ((y - y.mean()) ** 2).sum()
 
         # Calculate R-squared
         self.R2 = 1 - (SSR / SST)

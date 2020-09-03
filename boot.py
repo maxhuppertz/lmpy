@@ -101,8 +101,8 @@ def _get_p_i(bsamp, orig_estimate, one_sided=False, imp_null=False):
 
 
 # Define one iteration of the pairs bootstrap algorithm
-def _b_iter_pairs(model, X, Y, bootstrap_stat='coefficients', seed=0,
-                  fix_seed=True, copy_data=True, **kwargs_fit):
+def _b_iter_pairs(model, X, Y, weights=None, bootstrap_stat='coefficients',
+                  seed=0, fix_seed=True, copy_data=True, **kwargs_fit):
     """ Run one iteration of the pairs bootstrap
 
     Inputs
@@ -110,6 +110,7 @@ def _b_iter_pairs(model, X, Y, bootstrap_stat='coefficients', seed=0,
            results model.est. Underlying model used for the boostrap estimation.
     X: n by k matrix-like; RHS variables
     y: n by 1 vector-like; outcome variable
+    weights:
     bootstrap_stat: Statistic to bootstrap; must be a key in model.est
     seed: Scalar; seed to use if fix_seed is True
     fix_seed: Boolean; if True, fixes the seed at the provided value
@@ -127,6 +128,7 @@ def _b_iter_pairs(model, X, Y, bootstrap_stat='coefficients', seed=0,
     if copy_data:
         X = cp.copy(X)
         y = cp.copy(y)
+        W = cp.copy(weights)
 
     # Get number of iterations y and variables k
     n, k = X.shape
@@ -147,9 +149,10 @@ def _b_iter_pairs(model, X, Y, bootstrap_stat='coefficients', seed=0,
     # Draw samples of observations according to idx
     Xstar = X[idx,:]
     ystar = y[idx,:]
+    Wstar = W[idx,:]
 
     # Fit the model
-    model.fit(X=Xstar, y=ystar, **kwargs_fit)
+    model.fit(X=Xstar, y=ystar, weights=Wstar, **kwargs_fit)
 
     # Get the estimated coefficients
     res = cvec(model.est[bootstrap_stat])
@@ -188,7 +191,7 @@ def _b_iter_wild(model_res, model, X, U_hat_res, impose_null,
     model_res = cp.copy(model_res)
     model = cp.copy(model)
 
-    # Get X from the unrestricted model
+    # Copy data if needed
     if copy_data:
         X = cp.copy(X)
         U_hat_res = cp.copy(U_hat_res)
@@ -229,7 +232,7 @@ def _b_iter_wild(model_res, model, X, U_hat_res, impose_null,
     ystar = model_res.simulate(X=X_res, residuals=U_hatstar)
 
     # Fit the unrestricted model to the bootstrap sample
-    model.fit(X=X, y=ystar, **kwargs_fit)
+    model.fit(X=X, y=ystar, weights=weights, **kwargs_fit)
 
     # Get the estimated statistics
     res = cvec(model.est[bootstrap_stat])
@@ -239,9 +242,9 @@ def _b_iter_wild(model_res, model, X, U_hat_res, impose_null,
 
 # Define one iteration of the Cameron, Gelbach, and Miller (2008) cluster robust
 # wild bootstrap
-def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters,
+def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters, weights,
                 bootstrap_stat='coefficients', eta=1, seed=0, fix_seed=True,
-                labencode=skp.LabelEncoder(), copy_data=True, **kwargs_fit):
+                copy_data=True, **kwargs_fit):
     """ Run one iteration of the Cameron, Gelbach, and Miller (2008) bootstrap
 
     Inputs
@@ -266,7 +269,7 @@ def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters,
     model_res = cp.copy(model_res)
     model = cp.copy(model)
 
-    # Get X from the unrestricted model
+    # Copy data if needed
     if copy_data:
         X = cp.copy(X)
         U_hat_res = cp.copy(U_hat_res)
@@ -280,14 +283,8 @@ def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters,
     # Subset to X variables which no null was imposed on
     X_res = X_res[:, ~impose_null]
 
-    # Get cluster variable (doesn't matter from which model)
-    if isinstance(clusters, pd.Series):
-        clustvar = cvec(labencode.fit_transform(clusters))
-    else:
-        clustvar = cvec(labencode.fit_transform(clusters.flatten()))
-
     # Get the number of clusters in the data
-    J = len(np.unique(clustvar))
+    J = len(np.unique(clusters))
 
     # Get modified residuals, starting with disturbances drawn from a two point
     # distribution
@@ -307,7 +304,7 @@ def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters,
     E = cvec(E * eta)
 
     # Use cluster indices to assign each unit it's cluster's disturbance
-    E = E[clustvar[:,0],:]
+    E = E[clusters[:,0],:]
 
     # Get residuals times disturbance term
     U_hatstar = U_hat_res * E
@@ -316,7 +313,7 @@ def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters,
     ystar = model_res.simulate(X=X_res, residuals=U_hatstar)
 
     # Fit the unrestricted model to the bootstrap sample
-    model.fit(X=X, y=ystar, clusters=clusters, **kwargs_fit)
+    model.fit(X=X, y=ystar, clusters=clusters, weights=weights, **kwargs_fit)
 
     # Get the estimated statistics
     res = cvec(model.est[bootstrap_stat])
@@ -336,10 +333,11 @@ class boot():
     # Define initialization function
     def __init__(self, X, y=None, model=ols, algorithm='pairs',
                  impose_null_idx=None, eta=1, bootstrap_stat='t', level=None,
-                 one_sided=None, clusters=None, get_boot_cov=False,
-                 residuals=None, B=4999, store_bsamps=False,
+                 one_sided=None, clusters=None, weights=None,
+                 get_boot_cov=False, residuals=None, B=4999, store_bsamps=False,
                  par=True, corecap=np.inf, fix_seed=True, batch_size='auto',
-                 verbose=True, fprec=np.float64, nround=4, **kwargs_fit):
+                 verbose=True, fprec=np.float64, nround=4,
+                 labencode=skp.LabelEncoder(), **kwargs_fit):
         """ Initialize boot class
 
         Inputs
@@ -462,9 +460,6 @@ class boot():
         # Variables created by self.summarize()
         self.regtable = None
 
-        # Variables created by self.boot_cov()
-        #self.V_hat_boot = None
-
         # Check whether residuals
         if residuals is None and self.algorithm.lower() in ['wild', 'cgm']:
             if y is not None:
@@ -477,10 +472,20 @@ class boot():
                                  + 'provided; either provide residuals, or '
                                  + 'complete data')
 
+        # Convert cluster variable to numerically encoded, if it was provided (I
+        # do this so these can be used to index a numpy array when used in
+        # algorithms, which doesn't work with string data)
+        if clusters is not None:
+            if isinstance(clusters, pd.Series):
+                clusters = cvec(labencode.fit_transform(clusters))
+            else:
+                clusters = cvec(labencode.fit_transform(clusters.flatten()))
+
         # Run functions to get bootstrapped confidence interval
         # Get bootstrap distribution
         bsamps = self.bootstrap_distribution(
-            X=X, y=y, U_hat_res=residuals, clusters=clusters, **kwargs_fit
+            X=X, y=y, U_hat_res=residuals, clusters=clusters, weights=weights,
+            **kwargs_fit
         )
 
         # Get confidence intervals
@@ -535,7 +540,7 @@ class boot():
 
     # Define function to run different bootstrapping algorithms
     def bootstrap_distribution(self, X, y, U_hat_res=None, clusters=None,
-                               **kwargs_fit):
+                               weights=None, **kwargs_fit):
         """ Get bootstrap distribution  """
 
         # Check whether a vector indicating parameters which need to have a
@@ -567,7 +572,8 @@ class boot():
 
             # Fit the restricted model
             self.model_res.fit(
-                X_res, y, clusters=clusters, coef_only=True, **kwargs_fit
+                X_res, y, clusters=clusters, weights=weights, coef_only=True,
+                **kwargs_fit
             )
 
             # Set up a null impose Series to pass on to bootstrap algorithms
@@ -597,8 +603,9 @@ class boot():
             bsamps = (
                 jbl.Parallel(n_jobs=self.n_cores, batch_size=self.batch_size)(
                     jbl.delayed(_b_iter_pairs)(
-                        model=self.model, X=X, y=y, bootstrap_stat=self.stat,
-                        seed=b, fix_seed=self.fix_seed, **kwargs_fit)
+                        model=self.model, X=X, y=y, weights=weights,
+                        bootstrap_stat=self.stat, seed=b,
+                        fix_seed=self.fix_seed, **kwargs_fit)
                     for b in np.arange(self.B)
                 )
             )
@@ -610,7 +617,7 @@ class boot():
                 jbl.Parallel(n_jobs=self.n_cores, batch_size=self.batch_size)(
                     jbl.delayed(_b_iter_wild)(
                         model_res=self.model_res, model=self.model, X=X,
-                        U_hat_res=U_hat_res,
+                        U_hat_res=U_hat_res, weights=weights,
                         impose_null=impose_null_passon,
                         bootstrap_stat=self.stat, eta=self.eta, seed=b,
                         fix_seed=self.fix_seed, **kwargs_fit)
@@ -625,7 +632,7 @@ class boot():
                 jbl.Parallel(n_jobs=self.n_cores, batch_size=self.batch_size)(
                     jbl.delayed(_b_iter_cgm)(
                         model_res=self.model_res, model=self.model, X=X,
-                        U_hat_res=U_hat_res, clusters=clusters,
+                        U_hat_res=U_hat_res, clusters=clusters, weights=weights,
                         impose_null=impose_null_passon,
                         bootstrap_stat=self.stat, eta=self.eta, seed=b,
                         fix_seed=self.fix_seed, **kwargs_fit)
@@ -774,15 +781,16 @@ class boot():
 
     # Define a function to calculate the covariance matrix across bootstrap
     # samples
-    def boot_cov(self, bsamps):
+    def boot_cov(self, bsamps, weights=None):
         """ Calculate covariance matrix of bootstrapped statistics """
 
         # Calculate covariance
-        return np.cov(bsamps, rowvar=True)
+        return np.cov(bsamps, rowvar=True, aweights=weights)
 
 
     # Define a function to run Wald test
-    def wald(self, V_hat_boot=None, jointsig=None, R=None, b=None):
+    def wald(self, V_hat_boot=None, jointsig=None, R=None, b=None,
+             weights=None):
         """ Run a Wald test
 
         First run boot_cov(), then use this to calculate a Wald statistic. Note
@@ -813,7 +821,7 @@ class boot():
                       'statistic based on model covariance instead.')
 
             # Just get the Wald statistic from the underlying model
-            self.model.wald(jointsig=jointsig, R=R, b=b)
+            self.model.wald(jointsig=jointsig, R=R, b=b, weights=weights)
 
         # Save the results
         self.W_boot = self.model.W
