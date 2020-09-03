@@ -566,7 +566,9 @@ class boot():
             self.model_res = cp.deepcopy(self.model)
 
             # Fit the restricted model
-            self.model_res.fit(X_res, y, coef_only=True, **kwargs_fit)
+            self.model_res.fit(
+                X_res, y, clusters=clusters, coef_only=True, **kwargs_fit
+            )
 
             # Set up a null impose Series to pass on to bootstrap algorithms
             impose_null_passon = self.impose_null_idx[:,0]
