@@ -86,7 +86,7 @@ def _get_p_i(bsamp, orig_estimate, one_sided=False, imp_null=False):
     # just reject the null. This just puts an equal amount of mass outside of
     # -orig_estimate, which will not affect rejection of the null.
     if not one_sided:
-        p = 2 * p
+        p = np.amin([2 * p, 1])
 
     # Return the p-value
     return p
@@ -110,11 +110,12 @@ def _b_iter_pairs(model, X, Y, weights=None, bootstrap_stat='coefficients',
            results model.est. Underlying model used for the boostrap estimation.
     X: n by k matrix-like; RHS variables
     y: n by 1 vector-like; outcome variable
-    weights:
+    weights: n by 1 vector-like; weights to use in the estimation
     bootstrap_stat: Statistic to bootstrap; must be a key in model.est
     seed: Scalar; seed to use if fix_seed is True
     fix_seed: Boolean; if True, fixes the seed at the provided value
     copy_data: Boolean; if True, copies input data
+    kwargs_fit: Other keyword arguments, which will be passed on to model.fit()
 
     Output
     res: k by 1 vector, estimated statistics for the bootstrap sample
@@ -175,12 +176,20 @@ def _b_iter_wild(model_res, model, X, U_hat_res, impose_null,
            results model.est. Underlying unrestricted model used for the
            bootstrap estimation.
     X: n by k matrix-like; RHS variables
-    U_hat_res: n by 1 vector-like;
+    U_hat_res: n by 1 vector-like; residuals from the restricted model fit on
+               the original data
+    impose_null: k by 1 Boolean vector-like, the null will be imposed whereever
+                 impose_null is True
+    clusters: n by 1 vector-like, cluster indices, have to be able to be used as
+              an index for a numpy array
+    weights: n by 1 vector-like, weights to use for estimations
     bootstrap_stat: Statistic to bootstrap, must be a key in model.est
     eta: Scalar, absolute value of the two possible values of the two point
          distribution used to generate bootstrapped residuals
     seed: Scalar, seed to use if fix_seed is True
     fix_seed: Boolean, if True, fixes the seed at the provided value
+    copy_data: Boolean, if True, copies the data before using them
+    kwargs_fit: Other keyword arguments, which will be passed on to model.fit()
 
     Output
     res: k by 1 vector, estimated statistics for the bootstrap sample
@@ -229,7 +238,7 @@ def _b_iter_wild(model_res, model, X, U_hat_res, impose_null,
     U_hatstar = U_hat_res * E
 
     # Simulate outcomes
-    ystar = model_res.simulate(X=X_res, residuals=U_hatstar)
+    ystar = model_res.predict(X_res) + U_hatstar
 
     # Fit the unrestricted model to the bootstrap sample
     model.fit(X=X, y=ystar, weights=weights, **kwargs_fit)
@@ -254,11 +263,21 @@ def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters, weights,
     model: Model object, must have a fit() method and return a dictionary of
            results model.est. Underlying unrestricted model used for the
            bootstrap estimation.
+    X: n by k matrix-like, RHS variables
+    U_hat_res: n by 1 vector-like, residuals from the restricted model fit on
+               the original data
+    impose_null: k by 1 Boolean vector-like, the null will be imposed whereever
+                 impose_null is True
+    clusters: n by 1 vector-like, cluster indices, have to be able to be used as
+              an index for a numpy array
+    weights: n by 1 vector-like, weights to use for estimations
     bootstrap_stat: Statistic to bootstrap, must be a key in model.est
     eta: Scalar, absolute value of the two possible values of the two point
          distribution used to generate bootstrapped residuals
     seed: Scalar, seed to use if fix_seed is True
     fix_seed: Boolean, if True, fixes the seed at the provided value
+    copy_data: Boolean, if True, copies the data before using them
+    kwargs_fit: Other keyword arguments, which will be passed on to model.fit()
 
     Output
     res: k by 1 vector, estimated statistics for the bootstrap sample
@@ -310,7 +329,7 @@ def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters, weights,
     U_hatstar = U_hat_res * E
 
     # Simulate outcomes using the restricted model
-    ystar = model_res.simulate(X=X_res, residuals=U_hatstar)
+    ystar = model_res.predict(X_res) + U_hatstar
 
     # Fit the unrestricted model to the bootstrap sample
     model.fit(X=X, y=ystar, clusters=clusters, weights=weights, **kwargs_fit)
@@ -341,14 +360,14 @@ class boot():
         """ Initialize boot class
 
         Inputs
-        model: Model, must have certain methods and contain specific named
-               objects. All models in lmpy follow the conventions needed to be
-               used as an input for boot(). Underlying model used to estimate
-               statistics of interest on bootstrap samples.
         X: n by k matrix-like; RHS variables
         y: n by 1 vector-like or None; outcome variable. If model has not been
            fit, boot() can fit the model itself, given y was provided. Needed
            for the pairs bootstrap.
+        model: Model, must have certain methods and contain specific named
+               objects. All models in lmpy follow the conventions needed to be
+               used as an input for boot(). Underlying model used to estimate
+               statistics of interest on bootstrap samples.
         algorithm: String, bootstrap algorithm to use. Possible choices are:
 
                    'pairs': Pairs bootstrap
@@ -370,7 +389,16 @@ class boot():
         one_sided: Boolean or None, whether to construct one-sided confidence
                    intervals; if None, uses reasonable defaults, see
                    self.get_ci()
+        clusters: n by 1 vector-like or None, clusters to use for CGM algorithm
+        weights: n by 1 vector-like or None, weights to use in estimations
+        get_boot_cov: Boolean, whether to calculate bootstrap covariance matrix;
+                      if True, calculates covariance matrix based on bootstrap
+                      samples, and returns it as part of self.est
+        residuals: n by 1 vector-like or None, residuals from fitting the model
+                   (restricted model if a null is being imposed); not needed if
+                   y was provided
         B: Positive integer, number of bootstrap iterations to use
+        store_bsamps: Boolean, if True, stores bootstrap samples as self.bsamps
         par: Boolean, if True, runs bootstrap iterations in parallel
         corecap: Integer or np.inf, maximum number of cores to use. Setting this
                  to np.inf uses all available cores.
@@ -386,6 +414,10 @@ class boot():
                np.float32 instead can speed up NumPy's linear algebra in some
                settings.
         nround: Integer, results will be rounded to this number of decimals
+        labencode: Label encoder, has to be able to convert an array of labels
+                   (numbers or strings) into a numerical numpy array
+        kwargs_fit: Other keyword arguments, which will be passed on to the
+                    .fit() methods of any models
         """
 
         # Instantiate parameters
@@ -459,18 +491,6 @@ class boot():
 
         # Variables created by self.summarize()
         self.regtable = None
-
-        # Check whether residuals
-        if residuals is None and self.algorithm.lower() in ['wild', 'cgm']:
-            if y is not None:
-                residuals = cvec(y) - self.model.predict(X)
-            else:
-                raise ValueError('Error in boot(): The chosen bootstrap '
-                                 + 'algorithm ({}) '.format(self.algorithm)
-                                 + 'requires residuals, but residuals were not '
-                                 + 'provided, and data to fit on were not '
-                                 + 'provided; either provide residuals, or '
-                                 + 'complete data')
 
         # Convert cluster variable to numerically encoded, if it was provided (I
         # do this so these can be used to index a numpy array when used in
@@ -585,6 +605,25 @@ class boot():
 
             # Set up a null impose Series to pass on to bootstrap algorithms
             impose_null_passon = np.zeros(shape=X.shape[1]).astype(bool)
+
+        # Get residuals if needed
+        if (U_hat_res is None) and (self.algorithm.lower() in ['wild', 'cgm']):
+            # Make sure LHS data were provided
+            if y is not None:
+                # Use correct model to get residuals (restricted if null is
+                # imposed)
+                if self.impose_null_idx is not None:
+                    U_hat_res = cvec(y) - self.model_res.predict(X_res)
+                else:
+                    U_hat_res = cvec(y) - self.model.predict(X)
+            else:
+                # Otherwise, raise an error
+                raise ValueError('Error in boot(): The chosen bootstrap '
+                                 + 'algorithm ({}) '.format(self.algorithm)
+                                 + 'requires residuals, but residuals were not '
+                                 + 'provided, and data to fit on were not '
+                                 + 'provided; either provide residuals, or '
+                                 + 'complete data')
 
         # Check which algorithm to use
         #
