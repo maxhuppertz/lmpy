@@ -101,7 +101,7 @@ def _get_p_i(bsamp, orig_estimate, one_sided=False, imp_null=False):
 
 
 # Define one iteration of the pairs bootstrap algorithm
-def _b_iter_pairs(model, X, Y, weights=None, bootstrap_stat='coefficients',
+def _b_iter_pairs(model, X, y, weights=None, bootstrap_stat='coefficients',
                   seed=0, fix_seed=True, copy_data=True, **kwargs_fit):
     """ Run one iteration of the pairs bootstrap
 
@@ -163,7 +163,7 @@ def _b_iter_pairs(model, X, Y, weights=None, bootstrap_stat='coefficients',
 
 
 # Define one iteration of a wild bootstrap
-def _b_iter_wild(model_res, model, X, U_hat_res, impose_null,
+def _b_iter_wild(model_res, model, X, U_hat_res, impose_null, weights=None,
                  bootstrap_stat='coefficients', eta=1, seed=0, fix_seed=True,
                  copy_data=True, **kwargs_fit):
     """ Run one iteration of the wild bootstrap
@@ -180,8 +180,6 @@ def _b_iter_wild(model_res, model, X, U_hat_res, impose_null,
                the original data
     impose_null: k by 1 Boolean vector-like, the null will be imposed whereever
                  impose_null is True
-    clusters: n by 1 vector-like, cluster indices, have to be able to be used as
-              an index for a numpy array
     weights: n by 1 vector-like, weights to use for estimations
     bootstrap_stat: Statistic to bootstrap, must be a key in model.est
     eta: Scalar, absolute value of the two possible values of the two point
@@ -642,8 +640,8 @@ class boot():
             bsamps = (
                 jbl.Parallel(n_jobs=self.n_cores, batch_size=self.batch_size)(
                     jbl.delayed(_b_iter_pairs)(
-                        model=self.model, X=X, y=y, weights=weights,
-                        bootstrap_stat=self.stat, seed=b,
+                        model=self.model, X=X, y=y, clusters=clusters,
+                        weights=weights, bootstrap_stat=self.stat, seed=b,
                         fix_seed=self.fix_seed, **kwargs_fit)
                     for b in np.arange(self.B)
                 )
@@ -656,7 +654,7 @@ class boot():
                 jbl.Parallel(n_jobs=self.n_cores, batch_size=self.batch_size)(
                     jbl.delayed(_b_iter_wild)(
                         model_res=self.model_res, model=self.model, X=X,
-                        U_hat_res=U_hat_res, weights=weights,
+                        U_hat_res=U_hat_res, clusters=clusters, weights=weights,
                         impose_null=impose_null_passon,
                         bootstrap_stat=self.stat, eta=self.eta, seed=b,
                         fix_seed=self.fix_seed, **kwargs_fit)

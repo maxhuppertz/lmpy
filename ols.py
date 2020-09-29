@@ -314,12 +314,16 @@ class ols():
             W = np.diag(weights).astype(self.fprec)
         else:
             # If weights were not specified, use identity matrix
-            W = np.eye(self.n)
+            #W = np.eye(self.n)
+            W = None
 
         # Calculate coefficient vector
-        self.coef = (
-            cvec(scl.lstsq(np.sqrt(W) @ X, np.sqrt(W) @ y)[0])
-        ).astype(self.fprec)
+        if W is not None:
+            self.coef = (
+                cvec(scl.lstsq(np.sqrt(W) @ X, np.sqrt(W) @ y)[0])
+            ).astype(self.fprec)
+        else:
+            self.coef = cvec(scl.lstsq(X, y)[0]).astype(self.fprec)
 
         # Check whether to calculate anything besides the coefficients
         if not self.coef_only:
@@ -399,12 +403,16 @@ class ols():
         # Instantiate weights (this function should never be called without W
         # having been instantiated in self.__init__(), but just in case)
         if weights is None:
-            W = np.eye(X.shape[0])
+            #W = np.eye(X.shape[0])
+            W = None
         else:
             W = weights
 
         # Calculate (X'X)^(-1)
-        XXinv = scl.pinv(X.T @ W @ X)
+        if W is not None:
+            XXinv = scl.pinv(X.T @ W @ X)
+        else:
+            XXinv = scl.pinv(X.T @ X)
 
         # Get residuals and clusters
         U_hat = residuals
@@ -447,9 +455,14 @@ class ols():
         if cov_est.lower() == 'homoskedastic':
             # For the homoskedastic estimator, just calculate the standard
             # variance
-            self.V_hat = (
-                (1 / (self.n - self.k)) * XXinv * (U_hat.T @ W @ U_hat)
-            )
+            if W is not None:
+                self.V_hat = (
+                    (1 / (self.n - self.k)) * XXinv * (U_hat.T @ W @ U_hat)
+                )
+            else:
+                self.V_hat = (
+                    (1 / (self.n - self.k)) * XXinv * (U_hat.T @ U_hat)
+                )
 
         # HC1
         elif cov_est.lower() == 'hc1':
@@ -459,9 +472,15 @@ class ols():
             S = (U_hat @ np.ones(shape=(1,self.k))) * X
 
             # Calculate EHW variance/covariance matrix
-            self.V_hat = (
-                (self.n / (self.n - self.k)) * XXinv @ (S.T @ W**2 @ S) @ XXinv
-            )
+            if W is not None:
+                self.V_hat = (
+                    (self.n / (self.n - self.k))
+                    * XXinv @ (S.T @ W**2 @ S) @ XXinv
+                )
+            else:
+                self.V_hat = (
+                    (self.n / (self.n - self.k)) * XXinv @ (S.T @ S) @ XXinv
+                )
 
         # Clustered errors
         elif cov_est.lower() == 'cluster':
@@ -472,11 +491,14 @@ class ols():
             # has the .groupby() method, which is needed to sum observations
             # within cluster in the next step. Here, I need to incorporate the
             # weights in S, instead of multiplying them in later.
-            S = pd.DataFrame(
-                (W @ np.ones(shape=(X.shape[0],self.k)))
-                * (U_hat @ np.ones(shape=(1,self.k)))
-                * X
-            )
+            if W is not None:
+                S = pd.DataFrame(
+                    (W @ np.ones(shape=(X.shape[0],self.k)))
+                    * (U_hat @ np.ones(shape=(1,self.k)))
+                    * X
+                )
+            else:
+                S = pd.DataFrame((U_hat @ np.ones(shape=(1,self.k))) * X)
 
             # Sum all covariates within clusters
             S = S.groupby(clustvar[:,0], axis=0).sum()
