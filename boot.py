@@ -561,6 +561,14 @@ class boot():
                                weights=None, **kwargs_fit):
         """ Get bootstrap distribution  """
 
+        # Get number of columns of X (manually setting to one if it's a
+        # Series, since that only has one dimension)
+        if isinstance(X, pd.Series):
+            #k = 1
+            X = pd.DataFrame(X)
+        #else:
+        #    k = X.shape[1]
+
         # Check whether a vector indicating parameters which need to have a
         # null enforced was provided
         if self.impose_null_idx is not None:
