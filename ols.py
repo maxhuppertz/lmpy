@@ -690,7 +690,7 @@ class ols():
             X = np.array(X)
 
         if add_intercept is None:
-            add_icept = self.add_intercept
+            add_icept = self.add_icept
 
         # Check whether an intercept needs to be added
         if add_icept:
