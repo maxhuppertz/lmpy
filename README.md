@@ -5,4 +5,3 @@ The lmpy package implements some basic linear regression techniques, and complem
 
 ## Installation
 To install this package, such that you can import it into Python using ``import lmpy as lm`` for example, simply clone the repo. Then, add the path you cloned it into to your Pythonpath environment variable.
-
