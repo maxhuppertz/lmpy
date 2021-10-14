@@ -10,7 +10,7 @@
 import copy as cp
 import numpy as np
 import pandas as pd
-from hdmpy import cvec
+from lmpy.ols import cvec
 
 ################################################################################
 ### 2: Define functions

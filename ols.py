@@ -1,9 +1,7 @@
-################################################################################
-### Define OLS class
-################################################################################
+''' Define OLS class '''
 
 ################################################################################
-### 1: Setup
+# 1: Setup
 ################################################################################
 
 # Import necessary packages
@@ -11,17 +9,39 @@ import numpy as np
 import pandas as pd
 import scipy.linalg as scl
 import scipy.stats as scs
-from hdmpy import cvec
-from scipy.stats import norm
 
 ################################################################################
-### 2: Auxiliary functions
+# 2: Auxiliary functions
 ################################################################################
 
-# Currently, there are none
+
+# Define a function which turn a list or vector-like object into a proper two
+# dimensional column vector
+def cvec(a):
+    """ Turn a list or vector-like object into a proper column vector
+
+    Input
+    a: List or vector-like object, has to be a potential input for np.array()
+
+    Output
+    vec: two dimensional NumPy array, with the first dimension weakly greater
+         than the second (resulting in a column vector for a vector-like input)
+    """
+    # Conver input into a two dimensional NumPy array
+    vec = np.array(a, ndmin=2)
+
+    # Check whether the second dimension is strictly greater than the first
+    # (remembering Python's zero indexing)
+    if vec.shape[0] < vec.shape[1]:
+        # If so, transpose the input vector
+        vec = vec.T
+
+    # Return the column vector
+    return vec
+
 
 ################################################################################
-### 3: Define OLS class
+# 3: Define OLS class
 ################################################################################
 
 
@@ -86,6 +106,8 @@ class ols():
         # Instantiate parameters for ols.fit()
         self.name_gen_X = name_gen_X
         self.name_gen_y = name_gen_y
+        self.n = None
+        self.k = None
         self.add_icept = add_intercept
         self.name_gen_icept = name_gen_icept
         self.freq_weights = freq_weights
@@ -287,7 +309,7 @@ class ols():
             )
 
         # Check whether a cluster variable was provided
-        elif clusters is not None:
+        if clusters is not None:
             # If so, adjust the cluster variable
             clustvar = cvec(clusters)
 
@@ -311,7 +333,7 @@ class ols():
                 W = np.array(weights)
             else:
                 # Otherwise, make sure they're one dimensional
-                W = cvec(W)[:,0]
+                W = cvec(W)[:, 0]
 
             # Check whether frequency weights need to be used
             if not freq_weights:
@@ -387,8 +409,9 @@ class ols():
 
         # Combine results into a dictionary
         self.est = {
-            'coefficients': pd.DataFrame(self.coef, index=self.names_X,
-                                         columns=['Estimated coefficient']),
+            'coefficients': pd.DataFrame(
+                self.coef, index=self.names_X, columns=['Estimated coefficient']
+            ),
             'se': sedf,
             'covariance estimator': self.cov_est,
             't': tdf,
@@ -487,7 +510,7 @@ class ols():
             # Calculate component of middle part of EHW sandwich,
             # S_i = X_i u_i, which makes it very easy to calculate
             # sum_i X_i X_i' u_i^2 = S'S
-            S = (U_hat @ np.ones(shape=(1,self.k))) * X
+            S = (U_hat @ np.ones(shape=(1, self.k))) * X
 
             # Calculate EHW variance/covariance matrix
             if W is not None:
@@ -504,7 +527,7 @@ class ols():
         # Clustered errors
         elif cov_est.lower() == 'cluster':
             # Calculate number of clusters
-            J = len(np.unique(clustvar[:,0]))
+            J = len(np.unique(clustvar[:, 0]))
 
             # Same thing as S above, but needs to be a DataFrame, because pandas
             # has the .groupby() method, which is needed to sum observations
@@ -512,36 +535,34 @@ class ols():
             # weights in S, instead of multiplying them in later.
             if W is not None:
                 S = pd.DataFrame(
-                    (W @ np.ones(shape=(X.shape[0],self.k)))
-                    * (U_hat @ np.ones(shape=(1,self.k)))
+                    (W @ np.ones(shape=(X.shape[0], self.k)))
+                    * (U_hat @ np.ones(shape=(1, self.k)))
                     * X
                 )
             else:
-                S = pd.DataFrame((U_hat @ np.ones(shape=(1,self.k))) * X)
+                S = pd.DataFrame((U_hat @ np.ones(shape=(1, self.k))) * X)
 
             # Sum all covariates within clusters
-            S = S.groupby(clustvar[:,0], axis=0).sum()
+            S = S.groupby(clustvar[:, 0], axis=0).sum()
 
             # Convert back to a NumPy array
             S = np.array(S).astype(self.fprec)
 
             # Calculate cluster-robust variance estimator
             self.V_hat = (
-                ( (self.n - 1) / (self.n - self.k - kappa)) * (J / (J - 1))
+                ((self.n - 1) / (self.n - self.k - kappa)) * (J / (J - 1))
                 * XXinv @ (S.T @ S) @ XXinv
             )
 
         # Some other unknown method
         else:
             # Print an error message
-            raise ValueError('Error in ols.fit(): The specified covariance '
-                             + 'estimator ({})'.format(cov_est)
-                             + 'could not be recognized; please '
-                             + 'specify a valid estimator')
-
-        # Replace NaNs as zeros (happens if division by zero occurs)
-        #self.V_hat[np.isnan(self.V_hat)] = 0
-        #self.V_hat[np.isinf(self.V_hat)] = 0
+            raise ValueError(
+                'Error in ols.fit(): The specified covariance '
+                + 'estimator ({}) '.format(cov_est)
+                + 'could not be recognized; please '
+                + 'specify a valid estimator'
+            )
 
         # Calculate the standard errors for all coefficients
         self.se = cvec(np.sqrt(np.diag(self.V_hat))).astype(self.fprec)
@@ -853,57 +874,20 @@ class ols():
 
         # Make a table containing the result
         self.waldtable = (
-            pd.DataFrame(np.concatenate([self.W, self.pW], axis=0),
-                         index=['Wald statistic', 'p-value'],
-                         columns=['Estimate'])
+            pd.DataFrame(
+                np.concatenate([self.W, self.pW], axis=0),
+                index=['Wald statistic', 'p-value'],
+                columns=['Estimate']
+            )
         )
 
         # Return the Wald statistic and associated p-value
         return self.waldtable
 
 
-    # Define a function which generates a new draw of data (for bootstrapping)
-    #def simulate(self, X, residuals, coef=None):
-    #    """ Simulate data for bootstrap draws """
-
-        # Check whether coef was left at the default None
-    #    if coef is None:
-            # If so, set the simulation coefficients to the fitted coefficients
-    #        sim_coef = self.coef
-    #    else:
-            # Otherwise, set the simulation coefficients to a proper column
-            # vector based on coef
-    #        sim_coef = cvec(coef).astype(self.fprec)
-
-    #    if np.ndim(X) == 1:
-    #        X = cvec(X)
-    #    else:
-    #        X = np.array(X)
-
-        # Check whether an intercept needs to be added
-    #    if self.add_icept:
-            # If so, set up an intercept
-    #        cons = np.ones(shape=(X.shape[0], 1))
-
-            # Add it to the data matrix
-    #        X = np.concatenate([cons, X], axis=1)
-
-        # Make sure the data have the right precision
-    #    X = X.astype(self.fprec)
-
-        # Adjust the simulation residuals
-    #    sim_residuals = cvec(residuals).astype(self.fprec)
-
-        # Generate simulated data
-    #    y = X @ sim_coef + sim_residuals
-
-        # Return the result
-    #    return y
-
-
-    # Define a dummy method set_params(), so this can be used with that has such
-    # functionality (e.g. scikit-learn). I might later expand this to be an
-    # actual method, although it should not be necessary.
+    # Define a dummy method set_params(), so this can be used with packages that
+    # have such functionality (e.g. scikit-learn). I might later expand this to
+    # be an actual method.
     def set_params(self, *args, **kwargs):
         """ Dummy method which does nothing """
 

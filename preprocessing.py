@@ -13,7 +13,6 @@ import multiprocessing as mp
 import numpy as np
 import pandas as pd
 from lmpy.ols import ols
-from scipy.stats import randint
 
 ################################################################################
 ### 2: Preprocessing functions

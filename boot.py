@@ -9,8 +9,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats as scs
 import sklearn.preprocessing as skp
-from hdmpy import cvec
-from lmpy.ols import ols
+from lmpy.ols import cvec, ols
 from multiprocessing import cpu_count
 
 ################################################################################
@@ -320,7 +319,7 @@ def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters, weights,
     # Multiply by eta and convert to a proper column vector
     E = cvec(E * eta)
 
-    # Use cluster indices to assign each unit it's cluster's disturbance
+    # Use cluster indices to assign each unit its cluster's disturbance
     E = E[clusters[:,0],:]
 
     # Get residuals times disturbance term
