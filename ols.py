@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import scipy.linalg as scl
 import scipy.stats as scs
+import sklearn.linear_model as sklm
 
 ################################################################################
 # 2: Auxiliary functions
@@ -48,7 +49,6 @@ def cvec(a):
 # Define OLS model
 class ols():
     """ Runs OLS regressions """
-
 
     # Define initialization function
     def __init__(self, name_gen_X='X', name_gen_y='y', add_intercept=True,
@@ -154,7 +154,6 @@ class ols():
         self.W = None
         self.pW = None
         self.waldtable = None
-
 
     # Define a function to fit the model
     def fit(self, X, y, clusters=None, weights=None, names_X=None, name_y=None,
@@ -343,21 +342,25 @@ class ols():
                 # If these are frequency weights, update the number of
                 # observations
                 self.n = np.int(W.sum())
-
-            # Get diagonal weights matrix
-            W = np.diag(weights).astype(self.fprec)
         else:
             # If weights were not specified, use identity matrix
-            #W = np.eye(self.n)
+            # W = np.eye(self.n)
             W = None
 
         # Calculate coefficient vector
         if W is not None:
             self.coef = (
-                cvec(scl.lstsq(np.sqrt(W) @ X, np.sqrt(W) @ y)[0])
+                cvec(
+                    scl.lstsq(
+                        (cvec(np.sqrt(W)) @ np.ones((1, X.shape[1]))) * X,
+                        cvec(np.sqrt(W)) * y
+                    )[0]
+                )
             ).astype(self.fprec)
         else:
-            self.coef = cvec(scl.lstsq(X, y)[0]).astype(self.fprec)
+            self.coef = (
+                cvec(scl.lstsq(X, y)[0]).astype(self.fprec)
+            )
 
         # Check whether to calculate anything besides the coefficients
         if not coef_only:
@@ -420,11 +423,10 @@ class ols():
             'p': pdf,
             'wald': waldstat,
             'wald p': waldp,
-            'covariance matrix': Vdf#,
-            #'residuals': pd.DataFrame(U_hat, columns=['Residuals']),
-            #'clusters': pd.DataFrame(clustvar, columns=['Cluster ID'])
+            'covariance matrix': Vdf  # ,
+            # 'residuals': pd.DataFrame(U_hat, columns=['Residuals']),
+            # 'clusters': pd.DataFrame(clustvar, columns=['Cluster ID'])
         }
-
 
     # Define a function to calculate the covariance matrix plus standard errors
     def ols_cov(self, X, residuals, clusters=None, weights=None,
@@ -450,7 +452,8 @@ class ols():
 
         # Calculate (X'X)^(-1)
         if W is not None:
-            XXinv = scl.pinv(X.T @ W @ X)
+            XW = (cvec(np.sqrt(W)) @ np.ones((1, X.shape[1]))) * X
+            XXinv = scl.pinv(XW.T @ XW)
         else:
             XXinv = scl.pinv(X.T @ X)
 
@@ -496,9 +499,10 @@ class ols():
             # For the homoskedastic estimator, just calculate the standard
             # variance
             if W is not None:
+                UW = cvec(np.sqrt(W)) * U_hat
                 self.V_hat = (
                     (1 / (self.n - self.k - kappa))
-                    * XXinv * (U_hat.T @ W @ U_hat)
+                    * XXinv * (UW.T @ UW)
                 )
             else:
                 self.V_hat = (
@@ -514,9 +518,10 @@ class ols():
 
             # Calculate EHW variance/covariance matrix
             if W is not None:
+                SW = (cvec(W) @ np.ones((1, X.shape[1]))) * S
                 self.V_hat = (
                     (self.n / (self.n - self.k - kappa))
-                    * XXinv @ (S.T @ W**2 @ S) @ XXinv
+                    * XXinv @ (SW.T @ SW) @ XXinv
                 )
             else:
                 self.V_hat = (
@@ -535,8 +540,7 @@ class ols():
             # weights in S, instead of multiplying them in later.
             if W is not None:
                 S = pd.DataFrame(
-                    (W @ np.ones(shape=(X.shape[0], self.k)))
-                    * (U_hat @ np.ones(shape=(1, self.k)))
+                    ((cvec(W) * U_hat) @ np.ones(shape=(1, self.k)))
                     * X
                 )
             else:
@@ -578,7 +582,6 @@ class ols():
         # Return the results
         return sedf, Vdf
 
-
     # Define a function to calculate t-statistics
     def ols_t(self):
         """ Calculate t-statistics """
@@ -587,7 +590,6 @@ class ols():
 
         # Return the results
         return pd.DataFrame(self.t, index=self.names_X, columns=['t-statistic'])
-
 
     # Define a function to calculate confidence intervals
     def ols_ci(self, level=None, df_adjust=None):
@@ -612,16 +614,15 @@ class ols():
 
         # Calculate confidence intervals
         self.ci = (
-            self.coef @ np.ones(shape=(1,2))
-            + (self.se @ np.ones(shape=(1,2)))
-            * (np.ones(shape=(self.k,1)) @ cval)
+            self.coef @ np.ones(shape=(1, 2))
+            + (self.se @ np.ones(shape=(1, 2)))
+            * (np.ones(shape=(self.k, 1)) @ cval)
         )
 
         # Make a two element list of names for the upper and lower bound
         names_ci = ['{}%'.format(q*100) for q in quants]
 
         return pd.DataFrame(self.ci, index=self.names_X, columns=names_ci)
-
 
     # Define a function to calculate p-values
     def ols_p(self, df_adjust=None):
@@ -637,7 +638,6 @@ class ols():
 
         return pd.DataFrame(self.p, index=self.names_X, columns=['p-value'])
 
-
     # Define a function to return a 'classic' regression table
     def summarize(self):
         """ Produce a pandas DataFrame containing model results """
@@ -645,11 +645,12 @@ class ols():
         # Make a regression table DataFrame
         self.regtable = (
             pd.concat(
-                [self.est['coefficients'],
-                 self.est['se'],
-                 self.est['ci'],
-                 self.est['t'],
-                 self.est['p'],
+                [
+                    self.est['coefficients'],
+                    self.est['se'],
+                    self.est['ci'],
+                    self.est['t'],
+                    self.est['p'],
                 ], axis=1
             )
         )
@@ -662,7 +663,6 @@ class ols():
 
         # Return the result, to make it easily printable
         return self.regtable
-
 
     # Define a function which calculates fitted values
     def predict(self, X, add_intercept=None):
@@ -698,7 +698,6 @@ class ols():
 
         # Return them
         return y_hat
-
 
     # Define a function to calculate the R-squared
     def score(self, X, y, add_intercept=None, return_adjusted=False):
@@ -744,9 +743,8 @@ class ols():
         # Return desired R-squared
         if not return_adjusted:
             return self.R2
-        else:
-            return self.R2adj
 
+        return self.R2adj
 
     # Define a function to calculate a Wald test (e.g. of joint significance)
     def wald(self, jointsig=None, R=None, b=None, V_hat=None):
@@ -801,7 +799,7 @@ class ols():
                 # Otherwise, check whether an intercept needs to be added
                 if self.add_icept or (self.k == len(jointsig) + 1):
                     # If so, add a zero at the beginning of jointsig
-                    jointsig = np.array([0] + [j for j in jointsig])
+                    jointsig = np.array([0] + list(jointsig))
 
                 # Make sure jointsig is recorded as an integer array
                 Rbase = jointsig.astype(int)
@@ -883,7 +881,6 @@ class ols():
 
         # Return the Wald statistic and associated p-value
         return self.waldtable
-
 
     # Define a dummy method set_params(), so this can be used with packages that
     # have such functionality (e.g. scikit-learn). I might later expand this to
