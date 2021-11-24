@@ -50,11 +50,12 @@ class ols():
     """ Runs OLS regressions """
 
     # Define initialization function
-    def __init__(self, name_gen_X='X', name_gen_y='y', add_intercept=True,
-                 name_gen_icept='(Intercept)', coef_only=False,
-                 no_joint=False, covariance_estimator=None, freq_weights=False,
-                 level=.05, df_adjust=None, verbose=True, fprec=np.float64,
-                 nround=4):
+    def __init__(
+            self, name_gen_X='X', name_gen_y='y', add_intercept=True,
+            name_gen_icept='(Intercept)', coef_only=False, no_joint=False,
+            covariance_estimator=None, freq_weights=False, level=.05,
+            df_adjust=None, verbose=True, fprec=np.float64, nround=4
+    ):
         """ Initialize ols() class
 
         Inputs
@@ -72,12 +73,31 @@ class ols():
                               Possible choices are:
 
                               'homoskedastic': The homoskedastic covariance
-                                               estimator
-                              'hc1': The heteroskedasticity robust covariance
-                                     estimator of MacKinnon and White (1985)
-                              'cluster': The cluster robust covariance estimator
-                                         proved to be unbiased in Williams
-                                         (2000)
+                                               estimator with degrees of freedom
+                                               correction n / (n - k - 1)
+                              'hc1': The heteroskedasticity-robust covariance
+                                     estimator with degrees of freedom
+                                     correction n / (n - k - 1) due to Hinkley
+                                     (1977); also accepts 'robust' as a synonym
+                              'hc2': The heteroskedasticity-robust covariance
+                                     estimator with leverage adjustment
+                                     1 / (1 - h)^(.5) due to MacKinnon and White
+                                     (1985); also accepts 'cluster' as a synonym
+                              'hc3': The heteroskedasticity-robust covariance
+                                     estimator with leverage adjustment
+                                     1 / (1 - h) due to MacKinnon and White
+                                     (1985)
+                              'cr1': The cluster-robust covariance estimator
+                                     with degrees of freedom correction
+                                     (G / (G - 1)) * ((n - 1) / (n - k)) based
+                                     on Liang and Zeger (1985) and proved to be
+                                     unbiased in Williams (2000)
+                              'cr2': The cluster-robust covariance estimator
+                                     with leverage adjustment (1 - H)^(-.5) due
+                                     to Bell and McCaffrey (2002)
+                              'cr3': The cluster-robust covariance estimator
+                                     with leverage adjustment (1 - H)^(-1) due
+                                     to Bell and McCaffrey (2002)
 
                               If None, uses the default provided in
                               ols.ols_cov(), which is either 'hc1', if cluster
@@ -755,7 +775,7 @@ class ols():
 
     # Define a function to calculate the R-squared
     def score(self, X, y, add_intercept=None, return_adjusted=False):
-        """ Calculate R-squared """
+        """ Calculate R-squared and adjusted R-squared """
 
         # Make sure X is two dimensional
         if np.ndim(X) == 1:
@@ -941,6 +961,3 @@ class ols():
     # be an actual method.
     def set_params(self, *args, **kwargs):
         """ Dummy method which does nothing """
-
-        # Do nothing
-        pass
