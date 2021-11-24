@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 import scipy.linalg as scl
 import scipy.stats as scs
-import sklearn.linear_model as sklm
 
 ################################################################################
 # 2: Auxiliary functions
@@ -156,10 +155,12 @@ class ols():
         self.waldtable = None
 
     # Define a function to fit the model
-    def fit(self, X, y, clusters=None, weights=None, names_X=None, name_y=None,
+    def fit(
+            self, X, y, clusters=None, weights=None, names_X=None, name_y=None,
             name_gen_X=None, name_gen_y=None, add_intercept=None,
             coef_only=None, freq_weights=None, level=None, df_adjust=None,
-            no_joint=None, copy=True, **kwargs_wald):
+            no_joint=None, copy=True, **kwargs_wald
+    ):
         """ Fit OLS model
 
         Inputs
@@ -243,7 +244,7 @@ class ols():
         else:
             # ... use generic names
             self.names_X = [
-                self.name_gen_X+str(i+1) for i in np.arange(X.shape[1])
+                self.name_gen_X + str(i+1) for i in np.arange(X.shape[1])
             ]
 
         # Check whether names for y were provided
@@ -332,7 +333,7 @@ class ols():
                 W = np.array(weights)
             else:
                 # Otherwise, make sure they're one dimensional
-                W = cvec(W)[:, 0]
+                W = cvec(weights)[:, 0]
 
             # Check whether frequency weights need to be used
             if not freq_weights:
@@ -429,8 +430,10 @@ class ols():
         }
 
     # Define a function to calculate the covariance matrix plus standard errors
-    def ols_cov(self, X, residuals, clusters=None, weights=None,
-                covariance_estimator=None, df_adjust=None):
+    def ols_cov(
+            self, X, residuals, clusters=None, weights=None,
+            covariance_estimator=None, df_adjust=None
+    ):
         """ Calculate covariance matrix and standard errors
 
         Input
@@ -452,8 +455,8 @@ class ols():
 
         # Calculate (X'X)^(-1)
         if W is not None:
-            XW = (cvec(np.sqrt(W)) @ np.ones((1, X.shape[1]))) * X
-            XXinv = scl.pinv(XW.T @ XW)
+            XsqrtW = (cvec(np.sqrt(W)) @ np.ones((1, X.shape[1]))) * X
+            XXinv = scl.pinv(XsqrtW.T @ XsqrtW)
         else:
             XXinv = scl.pinv(X.T @ X)
 
@@ -469,48 +472,84 @@ class ols():
         # Otherwise, check whether the original value provided to __init__() was
         # left at the default None, and no cluster IDs were provided
         elif (self.cov_est is None) and (clustvar is None):
-            # If so, use HC1 as the default covariance estimator
-            cov_est = 'hc1'
+            # If so, use HC3 as the default covariance estimator; see
+            #
+            # http://datacolada.org/99
+            cov_est = 'hc3'
 
         # Otherwise, check whether the original value provided to __init__() was
         # left at the default None, and cluster IDs were provided
         elif (self.cov_est is None) and (clustvar is not None):
-            # If so, use clustered standard errors
-            cov_est = 'cluster'
+            # If so, use leverage-adjusted clustered standard errors
+            cov_est = 'cr3'
 
         else:
             # Otherwise, use the specified covariance estimator
             cov_est = self.cov_est
 
+        # Replace covariance estimator synonyms
+        if cov_est == 'robust':
+            cov_est = 'hc1'
+        elif cov_est == 'cluster':
+            cov_est = 'cr1'
+
         # Check whether clusters were provided, but a non-clustered covariance
         # estimator is being used, and the class is set to be talkative
         if (
                 (clustvar is not None)
-                and (cov_est != 'cluster')
+                and (cov_est.lower() not in ['cr1', 'cr2', 'cr3'])
                 and self.verbose
         ):
-            print('\nNote in ols(): Cluster IDs were provided, but a',
-                  'non-clustered covariance estimator is being used')
+            print(
+                '\nNote in ols(): Cluster IDs were provided, but a',
+                'non-cluster-robust covariance estimator ({})'.format(cov_est),
+                'is being used'
+            )
 
         # Check which covariance estimator to use
         #
-        # Homoskedastic
+        # Homoskedastic estimator
         if cov_est.lower() == 'homoskedastic':
+            # Calculate degrees of freedom correction
+            q = (1 / (self.n - self.k - kappa))
+
             # For the homoskedastic estimator, just calculate the standard
             # variance
             if W is not None:
                 UW = cvec(np.sqrt(W)) * U_hat
-                self.V_hat = (
-                    (1 / (self.n - self.k - kappa))
-                    * XXinv * (UW.T @ UW)
-                )
+                self.V_hat = q * XXinv * (UW.T @ UW)
             else:
-                self.V_hat = (
-                    (1 / (self.n - self.k - kappa)) * XXinv * (U_hat.T @ U_hat)
-                )
+                self.V_hat = q * XXinv * (U_hat.T @ U_hat)
 
-        # HC1
-        elif cov_est.lower() == 'hc1':
+        # Heteroskedasticity-robust estimators
+        elif cov_est.lower() in ['hc1', 'hc2', 'hc3']:
+            # Check whether leverage adjustment is needed
+            if cov_est.lower() in ['hc2', 'hc3']:
+                # Calculate leverage values
+                if W is not None:
+                    XW = cvec(W) @ np.ones((1, X.shape[1])) * X
+                    H = np.diag(X @ XXinv @ XW.T)
+                else:
+                    H = np.diag(X @ XXinv @ X.T)
+
+                # Calculate leverage adjustment
+                if cov_est.lower() == 'hc2':
+                    H = 1 / np.sqrt(1 - H)
+                elif cov_est.lower() == 'hc3':
+                    H = 1 / (1 - H)
+
+                # Convert to proper column vector
+                H = cvec(H)
+
+                # Adjust residuals
+                U_hat = H * U_hat
+
+                # Set degrees of freedom correction to 1 (no adjustment)
+                q = 1
+            else:
+                # Calculate degrees of freedom correction
+                q = (self.n / (self.n - self.k - kappa))
+
             # Calculate component of middle part of EHW sandwich,
             # S_i = X_i u_i, which makes it very easy to calculate
             # sum_i X_i X_i' u_i^2 = S'S
@@ -519,44 +558,59 @@ class ols():
             # Calculate EHW variance/covariance matrix
             if W is not None:
                 SW = (cvec(W) @ np.ones((1, X.shape[1]))) * S
-                self.V_hat = (
-                    (self.n / (self.n - self.k - kappa))
-                    * XXinv @ (SW.T @ SW) @ XXinv
-                )
+                self.V_hat = q * XXinv @ (SW.T @ SW) @ XXinv
             else:
-                self.V_hat = (
-                    (self.n / (self.n - self.k - kappa))
-                    * XXinv @ (S.T @ S) @ XXinv
-                )
+                self.V_hat = q * XXinv @ (S.T @ S) @ XXinv
 
-        # Clustered errors
-        elif cov_est.lower() == 'cluster':
+        # Cluster-robust estimators
+        elif cov_est.lower() in ['cr1', 'cr2', 'cr3']:
             # Calculate number of clusters
             J = len(np.unique(clustvar[:, 0]))
 
-            # Same thing as S above, but needs to be a DataFrame, because pandas
-            # has the .groupby() method, which is needed to sum observations
-            # within cluster in the next step. Here, I need to incorporate the
-            # weights in S, instead of multiplying them in later.
-            if W is not None:
-                S = pd.DataFrame(
-                    ((cvec(W) * U_hat) @ np.ones(shape=(1, self.k)))
-                    * X
-                )
+            # Check whether leverage adjustment is needed
+            if cov_est.lower() in ['cr2', 'cr3']:
+                if W is not None:
+                    XW = cvec(W) @ np.ones((1, X.shape[1])) * X
+
+                # Go through all clusters
+                for c in np.unique(clustvar[:, 0]):
+                    # Tab observations in the cluster
+                    iscl = clustvar[:, 0] == c
+
+                    # Get X matrix for this cluster
+                    Xc = X[iscl, :]
+
+                    # Calculate leverage adjustment
+                    if W is not None:
+                        XWc = XW[iscl, :]
+                        Hc = Xc @ XXinv @ XWc.T
+                    else:
+                        Hc = Xc @ XXinv @ Xc.T
+                    Hc = scl.pinv(np.eye(Hc.shape[0]) - Hc)
+                    if cov_est.lower() == 'cr2':
+                        Hc = np.real(scl.sqrtm(Hc))
+
+                    # Adjust residuals
+                    U_hat[iscl, :] = Hc @ U_hat[iscl, :]
+
+                # Set degrees of freedom correction to 1 (no adjustment)
+                q = 1
             else:
-                S = pd.DataFrame((U_hat @ np.ones(shape=(1, self.k))) * X)
+                # Calculate degrees of freedom correction
+                q = ((self.n - 1) / (self.n - self.k - kappa)) * (J / (J - 1))
 
-            # Sum all covariates within clusters
-            S = S.groupby(clustvar[:, 0], axis=0).sum()
+            # Same thing as S above
+            if W is not None:
+                S = ((cvec(W) * U_hat) @ np.ones(shape=(1, self.k))) * X
+            else:
+                S = (U_hat @ np.ones(shape=(1, self.k))) * X
 
-            # Convert back to a NumPy array
-            S = np.array(S).astype(self.fprec)
+            # Sum all covariates within clusters, convert back to NumPy array
+            S = pd.DataFrame(S).groupby(clustvar[:, 0], axis=0).sum()
+            S = S.to_numpy().astype(self.fprec)
 
             # Calculate cluster-robust variance estimator
-            self.V_hat = (
-                ((self.n - 1) / (self.n - self.k - kappa)) * (J / (J - 1))
-                * XXinv @ (S.T @ S) @ XXinv
-            )
+            self.V_hat = q * XXinv @ (S.T @ S) @ XXinv
 
         # Some other unknown method
         else:
