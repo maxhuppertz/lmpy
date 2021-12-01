@@ -101,8 +101,8 @@ class ols():
                                      to Bell and McCaffrey (2002)
 
                               If None, uses the default provided in
-                              ols.ols_cov(), which is either 'hc1', if cluster
-                              IDs were not provided in ols.fit(), or 'cluster',
+                              ols.ols_cov(), which is either 'hc3', if no
+                              cluster IDs were provided in ols.fit(), or 'cr3'
                               if cluster IDs were provided
         level: Scalar in [0,1], level for confidence intervals
         verbose: Boolean, if True, some notes and warnings are printed (e.g. if
