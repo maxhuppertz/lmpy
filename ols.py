@@ -82,7 +82,7 @@ class ols():
                               'hc2': The heteroskedasticity-robust covariance
                                      estimator with leverage adjustment
                                      1 / (1 - h)^(.5) due to MacKinnon and White
-                                     (1985); also accepts 'cluster' as a synonym
+                                     (1985)
                               'hc3': The heteroskedasticity-robust covariance
                                      estimator with leverage adjustment
                                      1 / (1 - h) due to MacKinnon and White
@@ -91,7 +91,8 @@ class ols():
                                      with degrees of freedom correction
                                      (G / (G - 1)) * ((n - 1) / (n - k)) based
                                      on Liang and Zeger (1985) and proved to be
-                                     unbiased in Williams (2000)
+                                     unbiased in Williams (2000); also accepts
+                                     'cluster' as a synonym
                               'cr2': The cluster-robust covariance estimator
                                      with leverage adjustment (1 - H)^(-.5) due
                                      to Bell and McCaffrey (2002)
