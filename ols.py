@@ -607,9 +607,11 @@ class ols():
                         Hc = Xc @ XXinv @ XWc.T
                     else:
                         Hc = Xc @ XXinv @ Xc.T
-                    Hc = scl.pinv(np.eye(Hc.shape[0]) - Hc)
+                    Hc = np.eye(Hc.shape[0]) - Hc
                     if cov_est.lower() == 'cr2':
-                        Hc = np.real(scl.sqrtm(Hc))
+                        Hc = np.real(scl.fractional_matrix_power(Hc, -.5))
+                    else:
+                        Hc = scl.pinv(Hc)
 
                     # Adjust residuals
                     U_hat[iscl, :] = Hc @ U_hat[iscl, :]
