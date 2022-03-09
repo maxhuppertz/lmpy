@@ -1,23 +1,20 @@
-################################################################################
-### Define functions to adjust p-values
-################################################################################
+""" Functions to adjust p-values """
 
 ################################################################################
-### 1: Setup
+# 1: Setup
 ################################################################################
 
 # Import necessary modules
-import copy as cp
 import numpy as np
 import pandas as pd
 from lmpy.ols import cvec
 
 ################################################################################
-### 2: Define functions
+# 2: Define functions
 ################################################################################
 
 ################################################################################
-### 2.1: Bonferroni correction
+# 2.1: Bonferroni correction
 ################################################################################
 
 
@@ -40,15 +37,11 @@ def bonferroni(p, varnames=None, gen_name='X'):
     padj = cvec(p * M)
 
     # Make sure these are no larger than one
-    toolarge = padj[:,0] > 1
+    toolarge = padj[:, 0] > 1
     padj[toolarge, 0] = 1
 
     # Check whether varnames are missing, but p is a pandas object
-    if (
-            (varnames is None)
-            and
-            (isinstance(p, pd.Series) or isinstance(p, pd.DataFrame))
-    ):
+    if (varnames is None) and isinstance(p, (pd.Series, pd.DataFrame)):
         # If so, use its index as variable names
         varnames = p.index
     elif varnames is None:
@@ -62,7 +55,7 @@ def bonferroni(p, varnames=None, gen_name='X'):
     return padj
 
 ################################################################################
-### 2.1: Holm-Bonferroni correction
+# 2.1: Holm-Bonferroni correction
 ################################################################################
 
 
@@ -85,7 +78,7 @@ def holm_bonferroni(p, varnames=None, gen_name='X'):
     padj = cvec(p)
 
     # Get an index which would sort the p-values
-    sortidx = np.argsort(padj[:,0])
+    sortidx = np.argsort(padj[:, 0])
 
     # Go through all p-values
     for k in np.arange(M):
@@ -105,11 +98,7 @@ def holm_bonferroni(p, varnames=None, gen_name='X'):
             padj[idxk, 0] = np.amax([padj[idxk, 0], padj[idxlast, 0]])
 
     # Check whether varnames are missing, but p is a pandas object
-    if (
-            (varnames is None)
-            and
-            (isinstance(p, pd.Series) or isinstance(p, pd.DataFrame))
-    ):
+    if (varnames is None) and isinstance(p, (pd.Series, pd.DataFrame)):
         # If so, use its index as variable names
         varnames = p.index
     elif varnames is None:

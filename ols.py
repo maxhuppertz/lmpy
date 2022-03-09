@@ -1,4 +1,4 @@
-''' Define OLS class '''
+""" Define OLS class """
 
 ################################################################################
 # 1: Setup
@@ -435,7 +435,7 @@ class ols():
         # Combine results into a dictionary
         self.est = {
             'coefficients': pd.DataFrame(
-                self.coef, index=self.names_X, columns=['Estimated coefficient']
+                self.coef, index=self.names_X, columns=['Estimate']
             ),
             'se': sedf,
             'covariance estimator': self.cov_est,

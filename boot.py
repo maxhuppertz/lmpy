@@ -1,19 +1,22 @@
+''' Bootstrapping algorithms '''
+
 ################################################################################
-### 1: Setup
+# 1: Setup
 ################################################################################
 
 # Import necessary packages
 import copy as cp
+from multiprocessing import cpu_count
+
 import joblib as jbl
 import numpy as np
 import pandas as pd
 import scipy.stats as scs
 import sklearn.preprocessing as skp
 from lmpy.ols import cvec, ols
-from multiprocessing import cpu_count
 
 ################################################################################
-### 2: Auxiliary functions
+# 2: Auxiliary functions
 ################################################################################
 
 
@@ -91,17 +94,19 @@ def _get_p_i(bsamp, orig_estimate, one_sided=False, imp_null=False):
     return p
 
 ################################################################################
-### 3: Bootstrap algorithms
+# 3: Bootstrap algorithms
 ################################################################################
 
 ################################################################################
-### 3.1: Single iterations for each algorithm
+# 3.1: Single iterations for each algorithm
 ################################################################################
 
 
 # Define one iteration of the pairs bootstrap algorithm
-def _b_iter_pairs(model, X, y, weights=None, bootstrap_stat='coefficients',
-                  seed=0, fix_seed=True, copy_data=True, **kwargs_fit):
+def _b_iter_pairs(
+        model, X, y, weights=None, bootstrap_stat='coefficients', seed=0,
+        fix_seed=True, copy_data=True, **kwargs_fit
+):
     """ Run one iteration of the pairs bootstrap
 
     Inputs
@@ -131,7 +136,7 @@ def _b_iter_pairs(model, X, y, weights=None, bootstrap_stat='coefficients',
         W = cp.copy(weights)
 
     # Get number of iterations y and variables k
-    n, k = X.shape
+    n, _ = X.shape
 
     # Draw an index for sample of bootstrap observations with replacement
     # (randint draws numbers between low and high-1, which combined with
@@ -147,9 +152,9 @@ def _b_iter_pairs(model, X, y, weights=None, bootstrap_stat='coefficients',
         idx = scs.randint(low=0, high=n).rvs(size=n)
 
     # Draw samples of observations according to idx
-    Xstar = X[idx,:]
-    ystar = y[idx,:]
-    Wstar = W[idx,:]
+    Xstar = X[idx, :]
+    ystar = y[idx, :]
+    Wstar = W[idx, :]
 
     # Fit the model
     model.fit(X=Xstar, y=ystar, weights=Wstar, **kwargs_fit)
@@ -162,9 +167,11 @@ def _b_iter_pairs(model, X, y, weights=None, bootstrap_stat='coefficients',
 
 
 # Define one iteration of a wild bootstrap
-def _b_iter_wild(model_res, model, X, U_hat_res, impose_null, weights=None,
-                 bootstrap_stat='coefficients', eta=1, seed=0, fix_seed=True,
-                 copy_data=True, **kwargs_fit):
+def _b_iter_wild(
+        model_res, model, X, U_hat_res, impose_null, weights=None,
+        bootstrap_stat='coefficients', eta=1, seed=0, fix_seed=True,
+        copy_data=True, **kwargs_fit
+):
     """ Run one iteration of the wild bootstrap
 
     Inputs
@@ -226,7 +233,7 @@ def _b_iter_wild(model_res, model, X, U_hat_res, impose_null, weights=None,
         E = scs.bernoulli(p=.5).rvs(size=n)
 
     # Replace any zeros as -1
-    E[E==0] = -1
+    E[E == 0] = -1
 
     # Multiply by eta and convert to a proper column vector
     E = cvec(E * eta)
@@ -246,11 +253,14 @@ def _b_iter_wild(model_res, model, X, U_hat_res, impose_null, weights=None,
     # Return the result
     return res
 
+
 # Define one iteration of the Cameron, Gelbach, and Miller (2008) cluster robust
 # wild bootstrap
-def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters, weights,
-                bootstrap_stat='coefficients', eta=1, seed=0, fix_seed=True,
-                copy_data=True, **kwargs_fit):
+def _b_iter_cgm(
+        model_res, model, X, U_hat_res, impose_null, clusters, weights,
+        bootstrap_stat='coefficients', eta=1, seed=0, fix_seed=True,
+        copy_data=True, **kwargs_fit
+):
     """ Run one iteration of the Cameron, Gelbach, and Miller (2008) bootstrap
 
     Inputs
@@ -314,13 +324,13 @@ def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters, weights,
         E = scs.bernoulli(p=.5).rvs(size=J)
 
     # Replace any zeros as -1
-    E[E==0] = -1
+    E[E == 0] = -1
 
     # Multiply by eta and convert to a proper column vector
     E = cvec(E * eta)
 
     # Use cluster indices to assign each unit its cluster's disturbance
-    E = E[clusters[:,0],:]
+    E = E[clusters[:, 0], :]
 
     # Get residuals times disturbance term
     U_hatstar = U_hat_res * E
@@ -338,22 +348,22 @@ def _b_iter_cgm(model_res, model, X, U_hat_res, impose_null, clusters, weights,
     return res
 
 ################################################################################
-### 3.2: Class to implement bootstrapping algorithms
+# 3.2: Class to implement bootstrapping algorithms
 ################################################################################
 
 
 class boot():
     """ Runs bootstrap algorithms """
 
-
     # Define initialization function
-    def __init__(self, X, y=None, model=ols, algorithm='pairs',
-                 impose_null_idx=None, eta=1, bootstrap_stat='t', level=None,
-                 one_sided=None, clusters=None, weights=None,
-                 get_boot_cov=False, residuals=None, B=4999, store_bsamps=False,
-                 par=True, corecap=np.inf, fix_seed=True, batch_size='auto',
-                 verbose=True, fprec=np.float64, nround=4,
-                 labencode=skp.LabelEncoder(), **kwargs_fit):
+    def __init__(
+            self, X, y=None, model=ols, algorithm='pairs', impose_null_idx=None,
+            eta=1, bootstrap_stat='t', level=None, one_sided=None,
+            clusters=None, weights=None, get_boot_cov=False, residuals=None,
+            B=4999, store_bsamps=False, par=True, corecap=np.inf, fix_seed=True,
+            batch_size='auto', verbose=True, fprec=np.float64, nround=4,
+            labencode=skp.LabelEncoder(), **kwargs_fit
+    ):
         """ Initialize boot class
 
         Inputs
@@ -554,19 +564,20 @@ class boot():
         if self.store_bsamps:
             self.bsamps = bsamps
 
-
     # Define function to run different bootstrapping algorithms
-    def bootstrap_distribution(self, X, y, U_hat_res=None, clusters=None,
-                               weights=None, **kwargs_fit):
+    def bootstrap_distribution(
+            self, X, y, U_hat_res=None, clusters=None, weights=None,
+            **kwargs_fit
+    ):
         """ Get bootstrap distribution  """
 
         # Get number of columns of X (manually setting to one if it's a
         # Series, since that only has one dimension)
         if isinstance(X, pd.Series):
-            #k = 1
+            # k = 1
             X = pd.DataFrame(X)
-        #else:
-        #    k = X.shape[1]
+        # else:
+        #     k = X.shape[1]
 
         # Check whether a vector indicating parameters which need to have a
         # null enforced was provided
@@ -590,7 +601,7 @@ class boot():
             # Get part of X corresponding to unrestricted coefficients in the
             # restricted model
             X_res = np.array(X)
-            X_res = X_res[:, ~self.impose_null_idx[:,0]]
+            X_res = X_res[:, ~self.impose_null_idx[:, 0]]
 
             # Set up restricted model
             self.model_res = cp.deepcopy(self.model)
@@ -602,7 +613,7 @@ class boot():
             )
 
             # Set up a null impose Series to pass on to bootstrap algorithms
-            impose_null_passon = self.impose_null_idx[:,0]
+            impose_null_passon = self.impose_null_idx[:, 0]
         else:
             # Otherwise, set self.model_res to self.model, so this can easily be
             # passed to algorithms which could have a null imposed
@@ -691,10 +702,8 @@ class boot():
                              + 'specified bootstrap algorithm could not be '
                              + 'recognized; please specify a valid algorithm.')
 
-
         # Concatenate bootstrap samples into a single k by B DataFrame
         return np.concatenate(bsamps, axis=1)
-
 
     # Define a function to calculate bootstrapped confidence intervals
     def get_ci(self, bsamps):
@@ -713,12 +722,12 @@ class boot():
         # quantile lies between two bootstrap observations, the test picks the
         # one which will make the confidence interval largest.
         ci = np.zeros(shape=(bsamps.shape[0], 2))
-        ci[:,0] = (
+        ci[:, 0] = (
             np.quantile(
                 bsamps, quants[0], axis=1, interpolation='lower'
             ).T.astype(self.fprec)
         )
-        ci[:,1] = (
+        ci[:, 1] = (
             np.quantile(
                 bsamps, quants[1], axis=1, interpolation='higher'
             ).T.astype(self.fprec)
@@ -726,11 +735,11 @@ class boot():
 
         # Replace upper or lower bounds if applicable
         if (self.one_sided == 'upper') and self.stat in ['wald']:
-            ci[:,0] = 0
+            ci[:, 0] = 0
         elif self.one_sided == 'upper':
-            ci[:,0] = -np.inf
+            ci[:, 0] = -np.inf
         elif self.one_sided == 'lower':
-            ci[:,1] = np.inf
+            ci[:, 1] = np.inf
 
         # Make a two element list of names for the upper and lower bound
         names_ci = ['{}%'.format(q*100) for q in quants]
@@ -742,7 +751,6 @@ class boot():
 
         # Return the DataFrame
         return ci
-
 
     # Define a function to calculate bootstrapped p-values
     def get_p(self, bsamps):
@@ -775,16 +783,15 @@ class boot():
         for i in np.arange(p.shape[0]):
             p.iloc[i, 0] = (
                 _get_p_i(
-                    bsamp=bsamps[i,:],
-                    orig_estimate=self.model.est[self.stat].iloc[i,:].values,
+                    bsamp=bsamps[i, :],
+                    orig_estimate=self.model.est[self.stat].iloc[i, :].values,
                     one_sided=self.one_sided,
-                    imp_null=imp0[i,0]
+                    imp_null=imp0[i, 0]
                 )
             )
 
         # Return vector of bootstrapped p-values
         return p
-
 
     # Define a function to summarize the results
     def summarize(self):
@@ -793,9 +800,10 @@ class boot():
         # Make a regression table DataFrame
         self.regtable = (
             pd.concat(
-                [self.est['original estimates'],
-                 self.est['ci'],
-                 self.est['p']
+                [
+                    self.est['original estimates'],
+                    self.est['ci'],
+                    self.est['p']
                 ], axis=1
             )
         )
@@ -811,7 +819,7 @@ class boot():
             # The first row will be missing if there was an intercept in X, and
             # it looks nicer if the resulting NAN is replaced with False
             if self.impose_null_idx.shape[0] != self.regtable.shape[0]:
-                self.regtable.iloc[0,-1] = False
+                self.regtable.iloc[0, -1] = False
 
         # Round the results
         self.regtable = self.regtable.round(self.nround)
@@ -822,7 +830,6 @@ class boot():
         # Return the result, to make it easily printable
         return self.regtable
 
-
     # Define a function to calculate the covariance matrix across bootstrap
     # samples
     def boot_cov(self, bsamps, weights=None):
@@ -830,7 +837,6 @@ class boot():
 
         # Calculate covariance
         return np.cov(bsamps, rowvar=True, aweights=weights)
-
 
     # Define a function to run Wald test
     def wald(self, V_hat_boot=None, jointsig=None, R=None, b=None,

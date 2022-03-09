@@ -1,25 +1,24 @@
-################################################################################
-### Define preprocessing functions
-################################################################################
+""" Useful preprocessing functions, especially VIF calculation """
 
 ################################################################################
-### 1: Setup
+# 1: Setup
 ################################################################################
 
 # Import necessary packages
 import copy as cp
-import joblib as jbl
 import multiprocessing as mp
+
+import joblib as jbl
 import numpy as np
 import pandas as pd
 from lmpy.ols import ols
 
 ################################################################################
-### 2: Preprocessing functions
+# 2: Preprocessing functions
 ################################################################################
 
 ################################################################################
-### 2.1: Variance inflation factors (VIFs)
+# 2.1: Variance inflation factors (VIFs)
 ################################################################################
 
 
@@ -96,7 +95,7 @@ def vif(X, cols=None, add_intercept=True, corecap=np.inf):
     res = np.array(res)
 
     # Split it into the indices (variable names) and VIFs
-    idx, VIF = res[:,0], res[:,1]
+    idx, VIF = res[:, 0], res[:, 1]
 
     # Make a DataFrame of VIFs, with the variable names as its index
     VIF = pd.DataFrame(VIF, index=idx, dtype=np.float)
@@ -174,7 +173,7 @@ def retain_vif(X, maxVIF=10, add_intercept=True, fix_seed=False,
     # Iterate until all VIFs are below tolerance
     while not converged:
         # Get the largest elements
-        sup = VIF.loc[VIF.iloc[:,0] == VIF.iloc[:,0].max(), 0]
+        sup = VIF.loc[VIF.iloc[:, 0] == VIF.iloc[:, 0].max(), 0]
 
         # Pick one of them at random to kick out. (The .sample() picks an
         # element, the .index returns a column name (because that's how vif()
@@ -189,7 +188,7 @@ def retain_vif(X, maxVIF=10, add_intercept=True, fix_seed=False,
         X = X.drop(drop, axis=1)
 
         # Mark all safe columns
-        safe = [c for i, c in enumerate(cands) if VIF.iloc[i,0] <= maxVIF]
+        safe = [c for i, c in enumerate(cands) if VIF.iloc[i, 0] <= maxVIF]
 
         # Add them to the list of safe columns
         safecols = safecols + safe
@@ -204,7 +203,10 @@ def retain_vif(X, maxVIF=10, add_intercept=True, fix_seed=False,
         if len(cands) > 0:
             # Recalculate VIFs for the remaining variables
             VIF = (
-                vif(X=X,cols=cands,add_intercept=add_intercept,corecap=corecap)
+                vif(
+                    X=X, cols=cands, add_intercept=add_intercept,
+                    corecap=corecap
+                )
             )
         else:
             # Otherwise, set the convergence indicator to True
@@ -221,7 +223,7 @@ def retain_vif(X, maxVIF=10, add_intercept=True, fix_seed=False,
     drop_varnames = [c for c in fullcols if c not in X.columns]
 
     # Get the names of all surviving variables
-    retain_varnames = [c for c in X.columns]
+    retain_varnames = list(X.columns)
 
     # Also get a boolean indicator for which variables survived (I usually find
     # retain_varnames easier to work with, but this can be handy if variables do
