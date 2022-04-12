@@ -344,9 +344,7 @@ class ols():
             # If not, use the provided value
             freq_weights = self.freq_weights
 
-        # Instantiate weights matrix (this needs to be a diagonal matrix, and
-        # np.diag() only works as expected with a one dimensional input, so for
-        # once, I have to make sure this is one dimensional
+        # Instantiate weights
         if weights is not None:
             # Start by instantiating the weights as is
             if np.ndim(weights) == 1:
@@ -462,8 +460,7 @@ class ols():
                               value provided in __init()__
         """
 
-        # Instantiate weights (this function should never be called without W
-        # having been instantiated in self.__init__(), but just in case)
+        # Instantiate weights
         if weights is None:
             W = None
         else:
@@ -639,7 +636,7 @@ class ols():
         else:
             # Print an error message
             raise ValueError(
-                'Error in ols.fit(): The specified covariance '
+                'Error in ols.cov(): The specified covariance '
                 + 'estimator ({}) '.format(cov_est)
                 + 'could not be recognized; please '
                 + 'specify a valid estimator'
