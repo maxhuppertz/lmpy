@@ -1,4 +1,4 @@
-''' Initialize lmpy '''
+""" Initialize lmpy """
 
 ################################################################################
 # 1: Load all parts of the project

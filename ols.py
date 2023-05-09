@@ -333,7 +333,6 @@ class ols():
         if clusters is not None:
             # If so, adjust the cluster variable
             clustvar = cvec(clusters)
-
         # Otherwise, just set clustvar to None
         else:
             clustvar = None
@@ -583,7 +582,7 @@ class ols():
         # Cluster-robust estimators
         elif cov_est.lower() in ['cr1', 'cr2', 'cr3']:
             # Calculate number of clusters
-            J = len(np.unique(clustvar[:, 0]))
+            J = len(pd.unique(clustvar[:, 0]))
 
             # Check whether leverage adjustment is needed
             if cov_est.lower() in ['cr2', 'cr3']:
@@ -591,7 +590,7 @@ class ols():
                     XW = cvec(W) @ np.ones((1, X.shape[1])) * X
 
                 # Go through all clusters
-                for c in np.unique(clustvar[:, 0]):
+                for c in pd.unique(clustvar[:, 0]):
                     # Tab observations in the cluster
                     iscl = clustvar[:, 0] == c
 
@@ -604,7 +603,9 @@ class ols():
                         Hc = Xc @ XXinv @ XWc.T
                     else:
                         Hc = Xc @ XXinv @ Xc.T
+
                     Hc = np.eye(Hc.shape[0]) - Hc
+
                     if cov_est.lower() == 'cr2':
                         Hc = np.real(scl.fractional_matrix_power(Hc, -.5))
                     else:

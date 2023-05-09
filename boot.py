@@ -1,4 +1,4 @@
-''' Bootstrapping algorithms '''
+""" Bootstrapping algorithms """
 
 ################################################################################
 # 1: Setup
@@ -65,7 +65,7 @@ def _get_p_i(bsamp, orig_estimate, one_sided=False, imp_null=False):
             p = scs.percentileofscore(bsamp, orig_estimate, kind='weak')/100
         else:
             # If no null was imposed, record one minus the percentile ranking of
-            # zero. (The are under the bootstrap CDF above zero.) A test which
+            # zero. (The area under the bootstrap CDF above zero.) A test which
             # uses a critical value just at zero will just reject the null. The
             # 'strict' option makes this conservative - it counts only values
             # strictly below zero.
@@ -86,7 +86,7 @@ def _get_p_i(bsamp, orig_estimate, one_sided=False, imp_null=False):
     # If the test is two sided, double the p-value. (The two cases above ensure
     # that the test under consideration uses a critical value which allows it to
     # just reject the null. This just puts an equal amount of mass outside of
-    # -orig_estimate, which will not affect rejection of the null.
+    # -orig_estimate, which will not affect rejection of the null.)
     if not one_sided:
         p = np.amin([2 * p, 1])
 
@@ -361,7 +361,7 @@ class boot():
             eta=1, bootstrap_stat='t', level=None, one_sided=None,
             clusters=None, weights=None, get_boot_cov=False, residuals=None,
             B=4999, store_bsamps=False, par=True, corecap=np.inf, fix_seed=True,
-            batch_size='auto', verbose=True, fprec=np.float64, nround=4,
+            batch_size='auto', verbose=True, fprec=float, nround=4,
             labencode=skp.LabelEncoder(), **kwargs_fit
     ):
         """ Initialize boot class
@@ -417,7 +417,7 @@ class boot():
                     batch_size = B / (cores used).
         verbose: Boolean, if True, boot() prints notes and warnings
         fprec: Float data type, all floats will be cast to this type. The
-               default value is np.float64, to ensure high precision. Using
+               default value is float, to ensure high precision. Using
                np.float32 instead can speed up NumPy's linear algebra in some
                settings.
         nround: Integer, results will be rounded to this number of decimals
@@ -760,7 +760,7 @@ class boot():
         orig = self.model.est[self.stat]
 
         # Set up an empty DataFrame for the bootstrapped p-values
-        p = pd.DataFrame(index=orig.index, columns=['p-value'], dtype=np.float)
+        p = pd.DataFrame(index=orig.index, columns=['p-value'], dtype=float)
 
         # Check whether no null needs to be imposed
         if self.impose_null_idx is None:
@@ -778,13 +778,13 @@ class boot():
                     np.concatenate([cvec(False), self.impose_null_idx], axis=0)
                 )
 
-        # Get bootstrapped p-values (this could be parallelized, altough it is
+        # Get bootstrapped p-values (this could be parallelized, although it is
         # generally fast relative to getting the bootstrap samples)
         for i in np.arange(p.shape[0]):
             p.iloc[i, 0] = (
                 _get_p_i(
                     bsamp=bsamps[i, :],
-                    orig_estimate=self.model.est[self.stat].iloc[i, :].values,
+                    orig_estimate=self.model.est[self.stat].iloc[i, 0],
                     one_sided=self.one_sided,
                     imp_null=imp0[i, 0]
                 )
