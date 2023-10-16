@@ -627,7 +627,7 @@ class ols():
                 S = (U_hat @ np.ones(shape=(1, self.k))) * X
 
             # Sum all covariates within clusters, convert back to NumPy array
-            S = pd.DataFrame(S).groupby(clustvar[:, 0], axis=0).sum()
+            S = pd.DataFrame(S).groupby(clustvar[:, 0]).sum()
             S = S.to_numpy().astype(self.fprec)
 
             # Calculate cluster-robust variance estimator
